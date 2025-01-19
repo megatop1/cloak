@@ -21,7 +21,7 @@ protocol_port_map = {
     "RDP": 3389,
     "WinRM": 5985,
     "SMB": 445,
-    "WMI": [135, 445, "50000-51000"],  # WMI requires specific ports and a range 
+    "WMI": [135, 445, "50000-51000"],  # WMI requires specific ports and a range
     "SSH/SFTP": 22
 }
 
@@ -66,68 +66,50 @@ def setup_tunnel(protocol_port_map, target_ip):
         return None
 
     tunnels = []
+    local_ports = [5986, 5985]  # Ports for intermediate and final hops
+
     for i in range(int(tunnel_amount)):
         print(f"Configuring Tunnel {i + 1}:")
-        tunnel_type = select(
-            "Tunnel Type:",
-            choices=["SOCKS Proxy", "SSH Tunnel", "Exit"],
+        ssh_ip = input("Enter SSH Tunnel IP: ")
+        ssh_port = input("Enter SSH Tunnel Port (default: 22): ").strip() or "22"
+        ssh_user = input("Enter SSH Username: ")
+
+        auth_method = select(
+            "Select Authentication Method:",
+            choices=["Password", "SSH Key"],
             style=custom_style
         ).ask()
 
-        if tunnel_type == "Exit":
-            continue
+        if auth_method == "Password":
+            ssh_pass = input("Enter SSH Password: ")
+        elif auth_method == "SSH Key":
+            ssh_key = select_ssh_key()
+            if not ssh_key:
+                print("No valid SSH key selected.")
+                return None
 
-        if tunnel_type == "SOCKS Proxy":
-            socks_ip = input("Enter SOCKS Proxy Server IP: ")
-            socks_port = input("Enter SOCKS Proxy Port: ")
-            tunnels.append(f"chisel client {socks_ip}:{socks_port} R:socks & sleep 5")
+        if i == 0:
+            # First hop: Forward to the next server
+            remote_target = "172.20.85.100:22"
+            local_port = local_ports[0]
+        elif i == 1:
+            # Second hop: Use the first tunnel's output
+            remote_target = f"{target_ip}:5985"
+            local_port = local_ports[1]
+            ssh_ip = "127.0.0.1"  # Use the first tunnel's output
+            ssh_port = local_ports[0]
 
-        elif tunnel_type == "SSH Tunnel":
-            ssh_ip = input("Enter SSH Tunnel IP: ")
-            ssh_port = input("Enter SSH Tunnel Port (default: 22): ").strip() or "22"
-            ssh_user = input("Enter SSH Username: ")
+        # Generate the tunnel command
+        if auth_method == "Password":
+            tunnels.append(
+                f"sshpass -p '{ssh_pass}' ssh -N -L 127.0.0.1:{local_port}:{remote_target} {ssh_user}@{ssh_ip} -p {ssh_port}"
+            )
+        elif auth_method == "SSH Key":
+            tunnels.append(
+                f"ssh -i {os.path.expanduser(f'~/.ssh/{ssh_key}')} -N -L 127.0.0.1:{local_port}:{remote_target} {ssh_user}@{ssh_ip} -p {ssh_port}"
+            )
 
-            auth_method = select(
-                "Select Authentication Method:",
-                choices=["Password", "SSH Key"],
-                style=custom_style
-            ).ask()
-
-            if auth_method == "Password":
-                ssh_pass = input("Enter SSH Password: ")
-            elif auth_method == "SSH Key":
-                ssh_key = select_ssh_key()
-                if not ssh_key:
-                    print("No valid SSH key selected.")
-                    continue
-
-            protocol = select(
-                "Select the Protocol for this Tunnel:",
-                choices=list(protocol_port_map.keys()),
-                style=custom_style
-            ).ask()
-
-            protocol_port = protocol_port_map.get(protocol, None)
-            if protocol == "Custom":
-                protocol_port = input("Enter the Custom Port: ")
-
-            if not protocol_port:
-                print(f"Invalid protocol: {protocol}")
-                continue
-
-            # Generate the tunnel command
-            if auth_method == "Password":
-                tunnels.append(
-                    f"sshpass -p '{ssh_pass}' ssh -N -L 127.0.0.1:{protocol_port}:{target_ip}:{protocol_port} "
-                    f"{ssh_user}@{ssh_ip} -p {ssh_port}"
-                )
-            elif auth_method == "SSH Key":
-                tunnels.append(
-                    f"ssh -i {os.path.expanduser(f'~/.ssh/{ssh_key}')} -N -L 127.0.0.1:{protocol_port}:{target_ip}:{protocol_port} "
-                    f"{ssh_user}@{ssh_ip} -p {ssh_port}"
-                )
-
-    return " && ".join(tunnels)
+    return " & sleep 2 && ".join(tunnels)
 
 
 # Masquerade Functions
@@ -159,21 +141,17 @@ def masquerade(service_name, command_template, default_port):
     subprocess.run(full_command, shell=True)
 
 
-
 # Specific Service Functions
 def winrm_masq():
     masquerade("WinRM", "evil-winrm -i 127.0.0.1 -u {username} -p {password}", 5985)
 
+
 def smb_masq():
     masquerade("SMB", "python3 /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {username} --password {password}", 445)
 
+
 def rdp_masq():
     masquerade("RDP", "xfreerdp /cert:ignore /u:{username} /p:{password} /v:127.0.0.1:{port}", 3389)
-
-## WMI Gets Treated Differently since you can't do one to one port mapping
-def wmi_masq():
-    print(f"\033[31mWARNING: WMI Module does NOT allow SSH Tunneling, only PROXY\033[0m")
-    masquerade("WMI", "python3 /usr/local/bin/wmiexec.py {username}@127.0.0.1", 5985)
 
 
 def ssh_masq():
@@ -187,12 +165,11 @@ def sftp_masq():
 # Main Program
 if __name__ == "__main__":
     print(f"\033[35m{ascii_art}\033[0m")
-    choice = select("Select a Masquerade Type:", choices=["WinRM", "SMB", "RDP", "WMI", "SSH", "SFTP", "Exit"], style=custom_style).ask()
+    choice = select("Select a Masquerade Type:", choices=["WinRM", "SMB", "RDP", "SSH", "SFTP", "Exit"], style=custom_style).ask()
 
     options = {
         "WinRM": winrm_masq,
         "SMB": smb_masq,
-        "WMI": wmi_masq,
         "RDP": rdp_masq,
         "SSH": ssh_masq,
         "SFTP": sftp_masq,
