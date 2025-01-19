@@ -1,6 +1,8 @@
 import os
 import subprocess
 import socket
+import re
+import time
 from questionary import Style, select, text
 
 # Define custom style
@@ -35,6 +37,28 @@ def get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+def get_active_port(process_name):
+    """Fetch the active port used by the specified process."""
+    try:
+        result = subprocess.run(["ss", "-tulpn"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        output = result.stdout.strip()
+        print(f"DEBUG: Output of `ss -tulpn`:\n{output}")
+
+        # Use regex to match the desired process and extract the port
+        pattern = rf"127\.0\.0\.1:(\d+).*users:\(\(\"{process_name}\""
+        match = re.search(pattern, output)
+
+        if match:
+            port = match.group(1)
+            print(f"Active port for {process_name}: {port}")
+            return port
+        else:
+            print(f"No active port found for process: {process_name}")
+            return None
+    except Exception as e:
+        print(f"Error fetching active port: {e}")
+        return None
 
 def list_ssh_keys(directory=os.path.expanduser("~/.ssh")):
     """List available SSH keys in the specified directory."""
@@ -83,8 +107,7 @@ def setup_tunnel_chain(tunnel_count, protocol, target_ip, target_port):
     for i in range(tunnel_count):
         print(f"Configuring Tunnel {i + 1}:")
         ssh_tunnel_ip = text(f"Enter SSH Tunnel {i + 1} IP:").ask()
-        ssh_tunnel_port = text(
-            f"Enter SSH Tunnel {i + 1} Port (default: 22):").ask() or "22"
+        ssh_tunnel_port = text(f"Enter SSH Tunnel {i + 1} Port (default: 22):").ask() or "22"
         ssh_tunnel_user = text(f"Enter SSH Tunnel {i + 1} Username:").ask()
         ssh_key_name = select_ssh_key()
 
@@ -98,19 +121,29 @@ def setup_tunnel_chain(tunnel_count, protocol, target_ip, target_port):
         if i == 0:
             # First tunnel connects to the target IP and target port
             command = (
-                f"ssh -i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:{target_ip}:{target_port} "
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {ssh_key_path} -N "
+                f"-L 127.0.0.1:{new_local_port}:{target_ip}:{target_port} "
                 f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
             )
         else:
             # Subsequent tunnels chain through the previous tunnel
             command = (
-                f"ssh -i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:127.0.0.1:{local_port} "
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {ssh_key_path} -N "
+                f"-L 127.0.0.1:{new_local_port}:127.0.0.1:{local_port} "
                 f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
             )
 
         execute_command(command)
-        tunnels.append(new_local_port)
-        local_port = new_local_port
+        time.sleep(2)  # Allow the tunnel to establish
+
+        # Fetch active port
+        active_port = get_active_port("ssh")
+        if active_port:
+            print(f"Active port for tunnel {i + 1}: {active_port}")
+            local_port = active_port
+        else:
+            print(f"Failed to fetch the active port for tunnel {i + 1}. Exiting.")
+            return None
 
     return local_port
 

@@ -69,7 +69,15 @@ else
 fi
 
 echo "Running the Docker container..."
-DOCKER_RUN_CMD=("sudo" "docker" "run" "-it" "--rm" "-e" "DISPLAY=$DISPLAY" "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR" "-v" "/tmp/.X11-unix:/tmp/.X11-unix" "--network=host")
+#DOCKER_RUN_CMD=("sudo" "docker" "run" "-it" "--rm" "-e" "DISPLAY=$DISPLAY" "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR" "-v" "/tmp/.X11-unix:/tmp/.X11-unix" "--network=host")
+DOCKER_RUN_CMD=(
+  "sudo" "docker" "run" "-it" "--rm"
+  "--privileged" # Allow access to host network stack
+  "-e" "DISPLAY=$DISPLAY"
+  "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR"
+  "-v" "/tmp/.X11-unix:/tmp/.X11-unix"
+  "--network=host"
+)
 
 if [ -n "$SSH_KEY_DIR" ]; then
     DOCKER_RUN_CMD+=("-v" "$SSH_KEY_DIR:/temp-ssh:ro")

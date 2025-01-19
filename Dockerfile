@@ -4,6 +4,8 @@ FROM python:3.12-slim
 # Install necessary tools
 RUN apt-get update && apt-get install -y \
     sshpass \
+    iproute2 \
+    net-tools \
     netcat-openbsd \
     openssh-client \
     curl \
