@@ -1,8 +1,8 @@
 import os
 import subprocess
 import socket
-import re
 import time
+import re
 from questionary import Style, select, text
 
 # Define custom style
@@ -19,10 +19,10 @@ ascii_art = """
 ═════════════════════════════════════════════════════════
 """
 
-# Global variable to hold SSH key directory
+# Global directory for SSH keys
 ssh_key_directory = None
 
-# Protocol-to-port mapping
+# Port mappings for predefined protocols
 protocol_port_map = {
     "WinRM": 5985,
     "RDP": 3389,
@@ -31,7 +31,16 @@ protocol_port_map = {
     "SMB": 445,
 }
 
-# Helper functions
+# Predefined tunnel ports for each protocol
+predefined_tunnel_ports = {
+    "WinRM": [56375, 34617],
+    "RDP": [33890, 33891],
+    "SSH": [22001, 22002],
+    "SFTP": [40000, 40001],
+    "SMB": [44500, 44501],
+}
+
+
 def get_free_port():
     """Find an available port on the local machine."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -53,11 +62,12 @@ def get_active_port(process_name="ssh"):
         # Parse the output to find the process and port
         for line in output.splitlines():
             if process_name in line:
-                parts = line.split()
-                local_address = parts[3]  # Typically Local Address:Port
-                port = local_address.split(":")[-1]  # Extract the port
-                print(f"DEBUG: Found active port for {process_name}: {port}")
-                return int(port)
+                # Extract the local address:port field
+                match = re.search(r'127\.0\.0\.1:(\d+)', line)
+                if match:
+                    port = match.group(1)
+                    print(f"DEBUG: Found active port for {process_name}: {port}")
+                    return int(port)
     except Exception as e:
         print(f"Error fetching active port: {e}")
     
@@ -68,12 +78,12 @@ def get_active_port(process_name="ssh"):
 def list_ssh_keys(directory=os.path.expanduser("~/.ssh")):
     """List available SSH keys in the specified directory."""
     try:
-        files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-        return files if files else []
+        return [
+            f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))
+        ]
     except (FileNotFoundError, PermissionError) as e:
         print(f"Error accessing directory {directory}: {e}")
         return []
-
 
 def select_ssh_key(directory=os.path.expanduser("~/.ssh")):
     """Prompt the user to select an SSH key."""
@@ -84,107 +94,186 @@ def select_ssh_key(directory=os.path.expanduser("~/.ssh")):
     return select("Select your SSH private key:", choices=keys, style=custom_style).ask()
 
 
-def select_ssh_key():
-    """Prompt user to select an SSH key from the global directory."""
-    keys = list_ssh_keys()
-    if not keys:
-        print(f"No SSH keys found in {ssh_key_directory}")
-        return None
-
-    return select(
-        "Select your SSH private key:",
-        choices=keys,
-        style=custom_style,
-    ).ask()
-
 def execute_command(command):
     """Run a shell command."""
     print(f"Executing: {command}")
     subprocess.run(command, shell=True)
 
-# Tunnel setup
-def setup_tunnel_chain(tunnel_count, protocol, target_ip, target_port):
-    """Set up SSH tunnels sequentially."""
-    global ssh_key_directory
-    tunnels = []
-    first_tunnel_port = None  # Track the first tunnel's port
-    local_port = target_port  # Initial port (target port)
+def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port):
+    if tunnel_count == 2:
+        # First Tunnel
+        print("Setting up Tunnel 1...")
+        ssh_tunnel1_ip = text("Enter SSH Tunnel 1 IP:").ask()
+        ssh_tunnel1_port = text("Enter SSH Tunnel 1 Port (default: 22):").ask() or "22"
+        ssh_tunnel1_user = text("Enter SSH Tunnel 1 Username:").ask()
+        ssh_key1_name = select_ssh_key()
 
-    for i in range(tunnel_count):
-        print(f"Configuring Tunnel {i + 1}:")
-        ssh_tunnel_ip = text(f"Enter SSH Tunnel {i + 1} IP:").ask()
-        ssh_tunnel_port = text(f"Enter SSH Tunnel {i + 1} Port (default: 22):").ask() or "22"
-        ssh_tunnel_user = text(f"Enter SSH Tunnel {i + 1} Username:").ask()
-        ssh_key_name = select_ssh_key()
-
-        if not ssh_key_name:
-            print("No valid SSH key selected. Exiting.")
+        if not ssh_key1_name:
+            print("No valid SSH key selected for Tunnel 1. Exiting.")
             return None, None
 
-        ssh_key_path = os.path.join(ssh_key_directory, ssh_key_name)
-        new_local_port = get_free_port()
+        ssh_key1_path = os.path.join(ssh_key_directory, ssh_key1_name)
+        tunnel1_local_port = 5986
 
-        if i == 0:
-            # First tunnel connects directly to the target
-            command = (
-                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-                f"-i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:{target_ip}:{target_port} "
-                f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
-            )
-            first_tunnel_port = new_local_port  # Save the first tunnel's port
-        else:
-            # Subsequent tunnels chain through the previous tunnel
-            active_port = get_active_port("ssh")
-            if not active_port:
-                print(f"Failed to fetch the active port for tunnel {i}. Exiting.")
-                return None, None
+        tunnel1_command = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key1_path} -N -L 127.0.0.1:{tunnel1_local_port}:{target_ip}:{target_port} "
+            f"{ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port} &"
+        )
+        print(f"DEBUG: Executing command for Tunnel 1: {tunnel1_command}")
+        execute_command(tunnel1_command)
 
-            command = (
-                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-                f"-i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:127.0.0.1:{active_port} "
-                f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
-            )
+        # Second Tunnel
+        print("Setting up Tunnel 2...")
+        ssh_tunnel2_ip = text("Enter SSH Tunnel 2 IP:").ask()
+        ssh_tunnel2_port = text("Enter SSH Tunnel 2 Port (default: 22):").ask() or "22"
+        ssh_tunnel2_user = text("Enter SSH Tunnel 2 Username:").ask()
+        ssh_key2_name = select_ssh_key()
 
-        execute_command(command)
-        tunnels.append(new_local_port)
-        local_port = new_local_port  # Update local_port to the newly created tunnel's port
+        if not ssh_key2_name:
+            print("No valid SSH key selected for Tunnel 2. Exiting.")
+            return None, None
 
-    return first_tunnel_port, local_port
+        ssh_key2_path = os.path.join(ssh_key_directory, ssh_key2_name)
+        tunnel2_local_port = 5985
 
-# Masquerade functions
+        tunnel2_command = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key2_path} -N -L 127.0.0.1:{tunnel2_local_port}:{target_ip}:{target_port} "
+            f"{ssh_tunnel2_user}@{ssh_tunnel2_ip} -p {ssh_tunnel2_port} "
+            f"-o ProxyCommand='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key1_path} -W %h:%p {ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port}' &"
+        )
+        print(f"DEBUG: Executing command for Tunnel 2: {tunnel2_command}")
+        execute_command(tunnel2_command)
+
+        return tunnel1_local_port, tunnel2_local_port
+
+def setup_two_hop_tunnel(target_ip, target_port):
+    """
+    Set up a two-hop SSH tunnel chain using only forward tunnels.
+    :param target_ip: Final target IP address (e.g., WinRM target).
+    :param target_port: Final target port (e.g., 5985 for WinRM).
+    :return: Last tunnel port to use for the final connection.
+    """
+    print("Configuring a two-hop tunnel...")
+
+    # Tunnel 1 configuration
+    print("Setting up Tunnel 1...")
+    ssh_tunnel1_ip = text("Enter SSH Tunnel 1 IP:").ask()  # Hop 1 IP
+    ssh_tunnel1_port = text("Enter SSH Tunnel 1 Port (default: 22):").ask() or "22"
+    ssh_tunnel1_user = text("Enter SSH Tunnel 1 Username:").ask()
+    ssh_key1_name = select_ssh_key()
+
+    if not ssh_key1_name:
+        print("No valid SSH key selected for Tunnel 1. Exiting.")
+        return None
+
+    ssh_key1_path = os.path.join(ssh_key_directory, ssh_key1_name)
+    tunnel1_local_port = 56375  # Static or dynamically chosen port
+
+    tunnel1_command = (
+        f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+        f"-i {ssh_key1_path} -N -L 127.0.0.1:{tunnel1_local_port}:{target_ip}:{target_port} "
+        f"{ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port} &"
+    )
+
+    print(f"DEBUG: Executing command for Tunnel 1: {tunnel1_command}")
+    execute_command(tunnel1_command)
+
+    # Verify Tunnel 1 is established
+    for retry in range(5):
+        active_port = get_active_port("ssh")
+        if active_port == tunnel1_local_port:
+            print(f"Tunnel 1 successfully established on port {tunnel1_local_port}.")
+            break
+        print(f"Retrying to establish Tunnel 1... ({retry + 1}/5)")
+        time.sleep(2)
+    else:
+        print("ERROR: Failed to establish Tunnel 1. Exiting.")
+        return None
+
+    # Tunnel 2 configuration
+    print("Setting up Tunnel 2...")
+    ssh_tunnel2_ip = text("Enter SSH Tunnel 2 IP:").ask()  # Hop 2 IP
+    ssh_tunnel2_port = text("Enter SSH Tunnel 2 Port (default: 22):").ask() or "22"
+    ssh_tunnel2_user = text("Enter SSH Tunnel 2 Username:").ask()
+    ssh_key2_name = select_ssh_key()
+
+    if not ssh_key2_name:
+        print("No valid SSH key selected for Tunnel 2. Exiting.")
+        return None
+
+    ssh_key2_path = os.path.join(ssh_key_directory, ssh_key2_name)
+    tunnel2_local_port = 34617  # Static or dynamically chosen port
+
+    tunnel2_command = (
+        f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+        f"-i {ssh_key2_path} -N -L 127.0.0.1:{tunnel2_local_port}:127.0.0.1:{tunnel1_local_port} "
+        f"{ssh_tunnel2_user}@{ssh_tunnel2_ip} -p {ssh_tunnel2_port} &"
+    )
+
+    print(f"DEBUG: Executing command for Tunnel 2: {tunnel2_command}")
+    execute_command(tunnel2_command)
+
+    # Verify Tunnel 2 is established
+    for retry in range(5):
+        active_port = get_active_port("ssh")
+        if active_port == tunnel2_local_port:
+            print(f"Tunnel 2 successfully established on port {tunnel2_local_port}.")
+            break
+        print(f"Retrying to establish Tunnel 2... ({retry + 1}/5)")
+        time.sleep(2)
+    else:
+        print("ERROR: Failed to establish Tunnel 2. Exiting.")
+        return None
+
+    # Return the port of the final tunnel for the WinRM connection
+    return tunnel2_local_port
+
 def winrm_masq():
+    """
+    Set up a WinRM masquerade dynamically for tunneling.
+    """
     print("Initializing WinRM masquerade...")
     target_ip = text("Enter Target IP of WinRM:").ask()
     username = text("Enter Username:").ask()
     password = text("Enter Password:").ask()
+    target_port = int(text("Enter the destination port of the target (e.g., 5985 for WinRM):").ask())
 
+    # Prompt for tunneling
     if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
         tunnel_count = int(select(
             "Select the Number of Tunnels Required:",
-            choices=["1", "2", "3"], style=custom_style
+            choices=["1", "2"],
+            style=custom_style,
         ).ask())
 
-        _, last_tunnel_port = setup_tunnel_chain(tunnel_count, "WinRM", target_ip, protocol_port_map["WinRM"])
+        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+            tunnel_count=tunnel_count,
+            target_ip=target_ip,
+            target_port=target_port,
+        )
+
         if not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
             return
 
-        # Use the last tunnel's port for Evil-WinRM
         winrm_command = f"evil-winrm -i 127.0.0.1 -u {username} -p {password} -P {last_tunnel_port}"
     else:
+        # No tunneling
         winrm_command = f"evil-winrm -i {target_ip} -u {username} -p {password}"
 
+    print(f"Executing: {winrm_command}")
     execute_command(winrm_command)
 
 
-# Main menu
 def main():
     global ssh_key_directory
     print(f"\033[35m{ascii_art}\033[0m")
 
-    # Ensure the SSH key directory is set correctly
     if ssh_key_directory is None:
-        ssh_key_directory = "/home/kali/.ssh"  # Replace this with a default value or passed argument.
+        ssh_key_directory = os.path.expanduser("~/.ssh")
 
     choice = select(
         "Select a Masquerade Type:",
@@ -194,13 +283,14 @@ def main():
 
     options = {
         "WinRM": winrm_masq,
-        # Add other masquerade functions for RDP, SSH, SFTP here
+        # Add additional protocols here as needed
     }
 
     if choice in options:
         options[choice]()
     else:
         print("Exiting. Goodbye!")
+
 
 if __name__ == "__main__":
     main()

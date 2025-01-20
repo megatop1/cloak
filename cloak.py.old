@@ -1,6 +1,9 @@
 import os
 import subprocess
-from questionary import Style, select
+import socket
+import time
+import re
+from questionary import Style, select, text
 
 # Define custom style
 custom_style = Style([("choice", "fg:blue")])
@@ -16,22 +19,68 @@ ascii_art = """
 ═════════════════════════════════════════════════════════
 """
 
-# Protocol to Port Mapping
+# Global directory for SSH keys
+ssh_key_directory = None
+
+# Port mappings for predefined protocols
 protocol_port_map = {
-    "RDP": 3389,
     "WinRM": 5985,
+    "RDP": 3389,
+    "SSH": 22,
+    "SFTP": 22,
     "SMB": 445,
-    "WMI": [135, 445, "50000-51000"],  # WMI requires specific ports and a range
-    "SSH/SFTP": 22
+}
+
+# Predefined tunnel ports for each protocol
+predefined_tunnel_ports = {
+    "WinRM": [56375, 34617],
+    "RDP": [33890, 33891],
+    "SSH": [22001, 22002],
+    "SFTP": [40000, 40001],
+    "SMB": [44500, 44501],
 }
 
 
-# Helper Functions
+def get_free_port():
+    """Find an available port on the local machine."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+def get_active_port(process_name="ssh"):
+    """Find the active local port for a given process."""
+    try:
+        result = subprocess.run(
+            ["ss", "-tulpn"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        output = result.stdout
+        print(f"DEBUG: Output of `ss -tulpn`:\n{output}")
+        
+        # Parse the output to find the process and port
+        for line in output.splitlines():
+            if process_name in line:
+                # Extract the local address:port field
+                match = re.search(r'127\.0\.0\.1:(\d+)', line)
+                if match:
+                    port = match.group(1)
+                    print(f"DEBUG: Found active port for {process_name}: {port}")
+                    return int(port)
+    except Exception as e:
+        print(f"Error fetching active port: {e}")
+    
+    print(f"No active port found for process: {process_name}")
+    return None
+
+
 def list_ssh_keys(directory=os.path.expanduser("~/.ssh")):
     """List available SSH keys in the specified directory."""
     try:
-        files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-        return files if files else []
+        return [
+            f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))
+        ]
     except (FileNotFoundError, PermissionError) as e:
         print(f"Error accessing directory {directory}: {e}")
         return []
@@ -46,153 +95,162 @@ def select_ssh_key(directory=os.path.expanduser("~/.ssh")):
     return select("Select your SSH private key:", choices=keys, style=custom_style).ask()
 
 
-def authenticate():
-    """Prompt for authentication choice and return credentials."""
-    choice = select("How do you want to authenticate?", choices=["Password", "Hashes"], style=custom_style).ask()
-    if choice == "Password":
-        return {"type": "password", "value": input("Enter Password: ")}
-    elif choice == "Hashes":
-        return {"type": "hash", "value": input("Enter NTLM Hash: ")}
+def execute_command(command):
+    """Run a shell command."""
+    print(f"Executing: {command}")
+    subprocess.run(command, shell=True)
 
-def setup_tunnel(protocol_port_map, target_ip):
-    """Set up multiple tunnels dynamically based on user input."""
-    tunnel_amount = select(
-        "Select the Number of Tunnels Required:",
-        choices=["1", "2", "3", "Exit"],
-        style=custom_style
-    ).ask()
+def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port, custom_ports=None):
+    """
+    Set up a chain of tunnels dynamically, with optional static or dynamic port allocation.
+    
+    :param tunnel_count: Number of tunnels to set up.
+    :param target_ip: Final destination IP for the target service.
+    :param target_port: Final destination port for the target service.
+    :param custom_ports: List of custom local ports to use for each tunnel.
+    :return: Tuple of the first and last tunnel ports.
+    """
+    print("Setting up tunnel chain...")
 
-    if tunnel_amount == "Exit":
-        return None
+    first_tunnel_port = None
+    previous_port = None
 
-    tunnels = []
-    local_ports = [5986, 5985]  # Define local ports for intermediate and final tunnels
-    intermediate_ip = None  # Tracks the intermediate hop's local endpoint
-
-    for i in range(int(tunnel_amount)):
+    for i in range(tunnel_count):
         print(f"Configuring Tunnel {i + 1}:")
-        ssh_ip = input("Enter SSH Tunnel IP: ")
-        ssh_port = input("Enter SSH Tunnel Port (default: 22): ").strip() or "22"
-        ssh_user = input("Enter SSH Username: ")
+        ssh_tunnel_ip = text(f"Enter SSH Tunnel {i + 1} IP:").ask()
+        ssh_tunnel_port = text(f"Enter SSH Tunnel {i + 1} Port (default: 22):").ask() or "22"
+        ssh_tunnel_user = text(f"Enter SSH Tunnel {i + 1} Username:").ask()
+        ssh_key_name = select_ssh_key()
 
-        auth_method = select(
-            "Select Authentication Method:",
-            choices=["Password", "SSH Key"],
-            style=custom_style
-        ).ask()
+        if not ssh_key_name:
+            print(f"No valid SSH key selected for Tunnel {i + 1}. Exiting.")
+            return None, None
 
-        if auth_method == "Password":
-            ssh_pass = input("Enter SSH Password: ")
-        elif auth_method == "SSH Key":
-            ssh_key = select_ssh_key()
-            if not ssh_key:
-                print("No valid SSH key selected.")
-                return None
+        ssh_key_path = os.path.join(ssh_key_directory, ssh_key_name)
 
-        # Configure Protocol Only for Final Tunnel
-        if i == int(tunnel_amount) - 1:
-            protocol = select(
-                "Select the Protocol for this Tunnel:",
-                choices=list(protocol_port_map.keys()),
-                style=custom_style
-            ).ask()
-
-            protocol_port = protocol_port_map.get(protocol, None)
-            if protocol == "Custom":
-                protocol_port = input("Enter the Custom Port: ")
-
-            if not protocol_port:
-                print(f"Invalid protocol: {protocol}")
-                return None
-
-            destination = f"{target_ip}:{protocol_port}"
+        # Check if the custom port is defined, and if it's available; otherwise, use a dynamic port
+        if custom_ports and i < len(custom_ports):
+            new_local_port = custom_ports[i]
+            # Check if the port is available
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                if sock.connect_ex(("127.0.0.1", new_local_port)) == 0:
+                    print(f"Port {new_local_port} is already in use. Allocating a new port dynamically.")
+                    new_local_port = get_free_port()
         else:
-            # Intermediate Tunnel: Always Forward SSH Traffic
-            destination = f"{ssh_ip}:{ssh_port}"
+            new_local_port = get_free_port()
 
-        # Generate the tunnel command
-        if auth_method == "Password":
-            tunnel_cmd = (
-                f"sshpass -p '{ssh_pass}' ssh -N -L 127.0.0.1:{local_ports[i]}:{destination} "
-                f"{ssh_user}@{ssh_ip} -p {ssh_port}"
+        if i == 0 and tunnel_count == 1:
+            # Single tunnel: forward directly to the target IP and port
+            command = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"-i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:{target_ip}:{target_port} "
+                f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
             )
-        elif auth_method == "SSH Key":
-            tunnel_cmd = (
-                f"ssh -i {os.path.expanduser(f'~/.ssh/{ssh_key}')} -N -L 127.0.0.1:{local_ports[i]}:{destination} "
-                f"{ssh_user}@{ssh_ip} -p {ssh_port}"
+            first_tunnel_port = new_local_port
+        elif i == 0:
+            # First tunnel connects directly to the intermediary
+            command = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"-i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:{ssh_tunnel_ip}:{ssh_tunnel_port} "
+                f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
+            )
+            first_tunnel_port = new_local_port
+        else:
+            # Subsequent tunnels go through the previous one
+            command = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"-i {ssh_key_path} -N -L 127.0.0.1:{new_local_port}:{target_ip}:{target_port} "
+                f"{ssh_tunnel_user}@127.0.0.1 -p {previous_port} &"
             )
 
-        tunnels.append(tunnel_cmd)
-        intermediate_ip = f"127.0.0.1:{local_ports[i]}"  # Update intermediate IP for the next hop
+        print(f"DEBUG: Executing command for Tunnel {i + 1}: {command}")
+        execute_command(command)
 
-    return " & sleep 2 && ".join(tunnels)
+        # Validate the tunnel is up
+        for retry in range(5):
+            active_port = get_active_port("ssh")
+            if active_port == new_local_port:
+                print(f"Tunnel {i + 1} successfully established on port {new_local_port}.")
+                break
+            print(f"Retrying to establish Tunnel {i + 1}... ({retry + 1}/5)")
+            time.sleep(2)
+        else:
+            print(f"ERROR: Failed to establish Tunnel {i + 1}. Exiting.")
+            return None, None
 
+        previous_port = new_local_port
 
-# Masquerade Functions
-def masquerade(service_name, command_template, default_port):
-    print(f"Initializing {service_name} masquerade...")
-    target_ip = input(f"Enter Target IP of {service_name}: ")
-    username = input(f"Enter Username: ")
+    return first_tunnel_port, previous_port
 
-    if input("Do you need to tunnel the connection? (Y/N): ").strip().lower() == "y":
-        tunnel_command = setup_tunnel(protocol_port_map, target_ip)
-        if not tunnel_command:
-            return
-    else:
-        tunnel_command = ""
-
-    auth = authenticate()
-    if auth["type"] == "password":
-        service_command = command_template.format(username=username, target_ip=target_ip, password=auth['value'], port=default_port)
-    elif auth["type"] == "hash":
-        service_command = command_template.format(username=username, target_ip=target_ip, hash=auth['value'], port=default_port)
-
-    # Combine tunnel and service commands
-    if tunnel_command:
-        full_command = f"{tunnel_command} & sleep 5 && {service_command}"
-    else:
-        full_command = service_command
-
-    print(f"Generated Command: {full_command}")
-    subprocess.run(full_command, shell=True)
-
-
-# Specific Service Functions
 def winrm_masq():
-    masquerade("WinRM", "evil-winrm -i 127.0.0.1 -u {username} -p {password}", 5985)
+    """
+    Set up a WinRM masquerade dynamically for tunneling.
+    """
+    print("Initializing WinRM masquerade...")
+    target_ip = text("Enter Target IP of WinRM:").ask()
+    username = text("Enter Username:").ask()
+    password = text("Enter Password:").ask()
+    target_port = int(text("Enter the destination port of the target (e.g., 5985 for WinRM):").ask())
+
+    # Prompt for tunneling
+    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
+        tunnel_count = int(select(
+            "Select the Number of Tunnels Required:",
+            choices=["1", "2", "3"],
+            style=custom_style,
+        ).ask())
+
+        # Use predefined static ports for this session
+        predefined_ports = [56375, 34617]  # Modify or extend these for your use case
+
+        # Pass target_ip as an argument
+        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+            tunnel_count=tunnel_count,
+            target_ip=target_ip,
+            target_port=target_port,
+            custom_ports=predefined_ports
+        )
+
+        if not last_tunnel_port:
+            print("Failed to set up tunnels. Exiting.")
+            return
+
+        # Use the correct port for Evil-WinRM
+        winrm_command_port = last_tunnel_port if tunnel_count > 1 else first_tunnel_port
+        winrm_command = f"evil-winrm -i 127.0.0.1 -u {username} -p {password} -P {winrm_command_port}"
+    else:
+        # No tunneling
+        winrm_command = f"evil-winrm -i {target_ip} -u {username} -p {password}"
+
+    print(f"Executing: {winrm_command}")
+    execute_command(winrm_command)
 
 
-def smb_masq():
-    masquerade("SMB", "python3 /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {username} --password {password}", 445)
 
-
-def rdp_masq():
-    masquerade("RDP", "xfreerdp /cert:ignore /u:{username} /p:{password} /v:127.0.0.1:{port}", 3389)
-
-
-def ssh_masq():
-    masquerade("SSH", "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {username}@127.0.0.1 -p {port} /bin/bash", 22)
-
-
-def sftp_masq():
-    masquerade("SFTP", "sftp {username}@127.0.0.1:{port}", 22)
-
-
-# Main Program
-if __name__ == "__main__":
+def main():
+    global ssh_key_directory
     print(f"\033[35m{ascii_art}\033[0m")
-    choice = select("Select a Masquerade Type:", choices=["WinRM", "SMB", "RDP", "SSH", "SFTP", "Exit"], style=custom_style).ask()
+
+    if ssh_key_directory is None:
+        ssh_key_directory = os.path.expanduser("~/.ssh")
+
+    choice = select(
+        "Select a Masquerade Type:",
+        choices=["WinRM", "RDP", "SSH", "SFTP", "Exit"],
+        style=custom_style,
+    ).ask()
 
     options = {
         "WinRM": winrm_masq,
-        "SMB": smb_masq,
-        "RDP": rdp_masq,
-        "SSH": ssh_masq,
-        "SFTP": sftp_masq,
+        # Add additional protocols here as needed
     }
 
     if choice in options:
         options[choice]()
     else:
         print("Exiting. Goodbye!")
+
+
+if __name__ == "__main__":
+    main()
 
