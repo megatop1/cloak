@@ -540,6 +540,104 @@ def ssh_masq():
     print("Executing:", command)
     subprocess.run(command, shell=True)
 
+def sftp_masq():
+    """
+    Set up a SFTP masquerade dynamically for tunneling.
+    """
+    print("Initializing SFTP masquerade...")
+    target_ip = text("Enter Target IP of SSH:").ask()
+    sftp_username = text("Enter Username:").ask()
+    #password = text("Enter Password:").ask()
+
+   # Prompt for tunneling
+    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
+        tunnel_count = int(select(
+            "Select the Number of Tunnels Required:",
+            choices=["1", "2"],
+            style=custom_style,
+        ).ask())
+
+        # Set predefined ports based on the tunnel count
+        predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
+
+
+        # Dynamically assign the target port based on the tunnel count
+        target_port = 22 if tunnel_count == 1 else 2222
+
+        # Set up tunnels and dynamically retrieve listening ports
+        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+            tunnel_count=tunnel_count,
+            target_ip=target_ip,
+            target_port=target_port,  # Automatically assigned
+            custom_ports=predefined_ports
+        )
+
+        # Debug: Ensure the correct ports are being used
+        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
+
+        if not first_tunnel_port or not last_tunnel_port:
+            print("Failed to set up tunnels. Exiting.")
+            return
+
+        # Use the first tunnel port for Evil-WinRM
+        ssh_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+
+        # Prompt for authentication type
+        auth_choice = select(
+            "How do you want to authenticate?",
+            choices=["Password", "Key"],
+            style=custom_style,
+        ).ask()
+
+        if auth_choice == "Password":
+            command = (
+                f"sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {sftp_username}@127.0.0.1"
+            )
+        elif auth_choice == "Key":
+            # Select SSH Key
+            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
+
+            if not selected_ssh_key:
+                print("No valid SSH key selected. Exiting.")
+                return  # Exit if no key is selected
+
+             # Construct the command using the selected SSH key
+            command = (
+                f"sftp -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{sftp_username}@127.0.0.1"
+             )
+
+    else:
+        # No tunneling
+                # Prompt for authentication type
+        auth_choice = select(
+            "How do you want to authenticate?",
+            choices=["Password", "Key"],
+            style=custom_style,
+        ).ask()
+
+        if auth_choice == "Password":
+            command = (
+                f"sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {sftp_username}@127.0.0.1"
+            )
+        elif auth_choice == "Key":
+            # Select SSH Key
+            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
+
+            if not selected_ssh_key:
+                print("No valid SSH key selected. Exiting.")
+                return  # Exit if no key is selected
+
+             # Construct the command using the selected SSH key
+            command = (
+                f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{sftp_username}@127.0.0.1 /bin/bash"
+             )
+
+    # Execute the command
+    print("Executing:", command)
+    subprocess.run(command, shell=True)
+
 
 def main():
     global ssh_key_directory
@@ -559,6 +657,7 @@ def main():
         "SMB": smb_masq,
         "RDP": rdp_masq,
         "SSH": ssh_masq,
+        "SFTP": sftp_masq,
         # Add additional protocols here as needed
     }
 
