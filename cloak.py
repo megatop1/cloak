@@ -497,14 +497,44 @@ def ssh_masq():
             )
         elif auth_choice == "Key":
             # Select SSH Key
-            command = (
-                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ssh_username}@127.0.0.1 /bin/bash"
-            )
+            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
 
+            if not selected_ssh_key:
+                print("No valid SSH key selected. Exiting.")
+                return  # Exit if no key is selected
+
+             # Construct the command using the selected SSH key
+            command = (
+                f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{ssh_username}@127.0.0.1 /bin/bash"
+             )
 
     else:
         # No tunneling
-        print("Hello World!")
+                # Prompt for authentication type
+        auth_choice = select(
+            "How do you want to authenticate?",
+            choices=["Password", "Key"],
+            style=custom_style,
+        ).ask()
+
+        if auth_choice == "Password":
+            command = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ssh_username}@127.0.0.1 /bin/bash"
+            )
+        elif auth_choice == "Key":
+            # Select SSH Key
+            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
+
+            if not selected_ssh_key:
+                print("No valid SSH key selected. Exiting.")
+                return  # Exit if no key is selected
+
+             # Construct the command using the selected SSH key
+            command = (
+                f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{ssh_username}@127.0.0.1 /bin/bash"
+             )
 
     # Execute the command
     print("Executing:", command)
