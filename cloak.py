@@ -99,55 +99,114 @@ def execute_command(command):
     print(f"Executing: {command}")
     subprocess.run(command, shell=True)
 
-def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port):
-    if tunnel_count == 2:
-        # First Tunnel
+def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port, custom_ports=None):
+    """
+    Set up a chain of tunnels dynamically based on the user-defined number of hops.
+
+    :param tunnel_count: Number of tunnels to set up.
+    :param target_ip: Final destination IP for the target service.
+    :param target_port: Final destination port for the target service.
+    :param custom_ports: List of custom local ports to use for each tunnel.
+    :return: Tuple of the first and last tunnel ports.
+    """
+    print("Setting up tunnel chain...")
+
+    # Validate custom_ports
+    if not custom_ports or len(custom_ports) < tunnel_count:
+        print("ERROR: Invalid custom ports list provided. Exiting.")
+        return None, None
+
+    first_tunnel_port = custom_ports[0]
+    last_tunnel_port = custom_ports[-1]
+
+    if tunnel_count == 1:
+        # Single tunnel logic
+        print("Setting up a single tunnel...")
+        ssh_tunnel_ip = text("Enter SSH Tunnel IP:").ask()
+        ssh_tunnel_port = text("Enter SSH Tunnel Port (default: 22):").ask() or "22"
+        ssh_tunnel_user = text("Enter SSH Tunnel Username:").ask()
+        ssh_key_name = select_ssh_key()
+
+        if not ssh_key_name:
+            print("No valid SSH key selected. Exiting.")
+            return None, None
+
+        ssh_key_path = os.path.join(ssh_key_directory, ssh_key_name)
+
+        command = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key_path} -N -L 127.0.0.1:{last_tunnel_port}:{target_ip}:{target_port} "
+            f"{ssh_tunnel_user}@{ssh_tunnel_ip} -p {ssh_tunnel_port} &"
+        )
+
+        print(f"DEBUG: Executing command for single tunnel: {command}")
+        execute_command(command)
+
+        return last_tunnel_port, last_tunnel_port  # Both first and last ports are the same for one tunnel
+
+    elif tunnel_count == 2:
+        # Two-hop tunnel logic
+        print("Setting up a two-hop tunnel...")
+
+        # First tunnel configuration
         print("Setting up Tunnel 1...")
         ssh_tunnel1_ip = text("Enter SSH Tunnel 1 IP:").ask()
         ssh_tunnel1_port = text("Enter SSH Tunnel 1 Port (default: 22):").ask() or "22"
         ssh_tunnel1_user = text("Enter SSH Tunnel 1 Username:").ask()
         ssh_key1_name = select_ssh_key()
 
-        if not ssh_key1_name:
-            print("No valid SSH key selected for Tunnel 1. Exiting.")
-            return None, None
-
-        ssh_key1_path = os.path.join(ssh_key_directory, ssh_key1_name)
-        tunnel1_local_port = 5986
-
-        tunnel1_command = (
-            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-            f"-i {ssh_key1_path} -N -L 127.0.0.1:{tunnel1_local_port}:{target_ip}:{target_port} "
-            f"{ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port} &"
-        )
-        print(f"DEBUG: Executing command for Tunnel 1: {tunnel1_command}")
-        execute_command(tunnel1_command)
-
-        # Second Tunnel
+        # Second tunnel configuration
         print("Setting up Tunnel 2...")
         ssh_tunnel2_ip = text("Enter SSH Tunnel 2 IP:").ask()
         ssh_tunnel2_port = text("Enter SSH Tunnel 2 Port (default: 22):").ask() or "22"
         ssh_tunnel2_user = text("Enter SSH Tunnel 2 Username:").ask()
         ssh_key2_name = select_ssh_key()
 
+        if not ssh_key1_name:
+            print("No valid SSH key selected for Tunnel 1. Exiting.")
+            return None, None
+
+        ssh_key1_path = os.path.join(ssh_key_directory, ssh_key1_name)
+
+        tunnel1_command = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key1_path} -N -L 127.0.0.1:{first_tunnel_port}:{ssh_tunnel2_ip}:{ssh_tunnel2_port} "
+            f"{ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port} &"
+        )
+
+        print(f"DEBUG: Executing command for Tunnel 1: {tunnel1_command}")
+        execute_command(tunnel1_command)
+
+        # Add 5-second sleep after starting Tunnel 1
+        print("Sleeping for 5 seconds to ensure Tunnel 1 is established...")
+        time.sleep(5)
+
         if not ssh_key2_name:
             print("No valid SSH key selected for Tunnel 2. Exiting.")
             return None, None
 
         ssh_key2_path = os.path.join(ssh_key_directory, ssh_key2_name)
-        tunnel2_local_port = 5985
 
         tunnel2_command = (
             f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-            f"-i {ssh_key2_path} -N -L 127.0.0.1:{tunnel2_local_port}:{target_ip}:{target_port} "
-            f"{ssh_tunnel2_user}@{ssh_tunnel2_ip} -p {ssh_tunnel2_port} "
-            f"-o ProxyCommand='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-            f"-i {ssh_key1_path} -W %h:%p {ssh_tunnel1_user}@{ssh_tunnel1_ip} -p {ssh_tunnel1_port}' &"
+            f"-i {ssh_key2_path} -N -L 127.0.0.1:{last_tunnel_port}:{target_ip}:{last_tunnel_port} "
+            f"{ssh_tunnel2_user}@127.0.0.1 -p {first_tunnel_port} &"
         )
+
+
         print(f"DEBUG: Executing command for Tunnel 2: {tunnel2_command}")
         execute_command(tunnel2_command)
 
-        return tunnel1_local_port, tunnel2_local_port
+        # Add 5-second sleep after starting Tunnel 2
+        print("Sleeping for 5 seconds to ensure Tunnel 2 is established...")
+        time.sleep(5)
+
+        return first_tunnel_port, last_tunnel_port  # Return both ports for use by the caller
+
+    else:
+        print(f"ERROR: Unsupported number of tunnels: {tunnel_count}")
+        return None, None
+
 
 def setup_two_hop_tunnel(target_ip, target_port):
     """
@@ -239,7 +298,6 @@ def winrm_masq():
     target_ip = text("Enter Target IP of WinRM:").ask()
     username = text("Enter Username:").ask()
     password = text("Enter Password:").ask()
-    target_port = int(text("Enter the destination port of the target (e.g., 5985 for WinRM):").ask())
 
     # Prompt for tunneling
     if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
@@ -249,21 +307,37 @@ def winrm_masq():
             style=custom_style,
         ).ask())
 
+        # Set predefined ports based on the tunnel count
+        predefined_ports = [5985] if tunnel_count == 1 else [5986, 5985]
+
+        # Dynamically assign the target port based on the tunnel count
+        target_port = 5985 if tunnel_count == 1 else 5986
+
+        # Set up tunnels and dynamically retrieve listening ports
         first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
             tunnel_count=tunnel_count,
             target_ip=target_ip,
-            target_port=target_port,
+            target_port=target_port,  # Automatically assigned
+            custom_ports=predefined_ports
         )
 
-        if not last_tunnel_port:
+        # Debug: Ensure the correct ports are being used
+        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
+
+        if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
             return
 
-        winrm_command = f"evil-winrm -i 127.0.0.1 -u {username} -p {password} -P {last_tunnel_port}"
+        # Use the first tunnel port for Evil-WinRM
+        winrm_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+        print(f"DEBUG: Using tunnel port {winrm_command_port} for Evil-WinRM connection.")
+        winrm_command = f"evil-winrm -i 127.0.0.1 -u {username} -p {password}"
     else:
-        # No tunneling
-        winrm_command = f"evil-winrm -i {target_ip} -u {username} -p {password}"
+        # No tunneling: direct connection to target port 5985
+        target_port = 5985
+        winrm_command = f"evil-winrm -i {target_ip} -u {username} -p {password} -P {target_port}"
 
+    # Print and execute the Evil-WinRM command
     print(f"Executing: {winrm_command}")
     execute_command(winrm_command)
 
