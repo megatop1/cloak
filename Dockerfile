@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     git \
+    vim \
     software-properties-common \
     freerdp2-x11 \
     ruby-dev \

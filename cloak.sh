@@ -3,14 +3,18 @@
 IMAGE_NAME="cloak:latest"
 REBUILD=false
 SSH_KEY_DIR="$HOME/.ssh"
-HOST_LOOT_DIR="./loot"
+HOST_LOOT_DIR="$(pwd)/loot"
 CONTAINER_LOOT_DIR="/app/loot"
+HOST_PAYLOADS_DIR="$(pwd)/payloads"
+CONTAINER_PAYLOADS_DIR="/app/payloads"
 
-# Ensure the loot directory exists on the host
-if [ ! -d "$HOST_LOOT_DIR" ]; then
-    echo "Creating payloads directory: $HOST_LOOT_DIR"
-    mkdir -p "$HOST_LOOT_DIR"
-fi
+# Ensure the loot and payloads directories exist on the host
+for DIR in "$HOST_LOOT_DIR" "$HOST_PAYLOADS_DIR"; do
+    if [ ! -d "$DIR" ]; then
+        echo "Creating directory: $DIR"
+        mkdir -p "$DIR"
+    fi
+done
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -35,30 +39,9 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-if ! command -v xfreerdp &> /dev/null; then
-    echo "xfreerdp is not installed on the host. Install it with:"
-    echo "sudo apt-get update && sudo apt-get install -y freerdp2-x11"
-    exit 1
-fi
-
-if [ -n "$SSH_KEY_DIR" ]; then
-    if [ ! -d "$SSH_KEY_DIR" ]; then
-        echo "The provided directory does not exist: $SSH_KEY_DIR"
-        exit 1
-    fi
-    echo "Using SSH key directory: $SSH_KEY_DIR"
-fi
-
-echo "Granting X11 permissions to Docker..."
-xhost +local:docker
-if [ $? -ne 0 ]; then
-    echo "Failed to grant X11 permissions. Ensure X11 is running and try again."
-    exit 1
-fi
-
 if $REBUILD || ! docker image inspect "$IMAGE_NAME" > /dev/null 2>&1; then
     echo "Building the Docker image..."
-    sudo docker buildx bake
+    sudo docker build -t "$IMAGE_NAME" .
     if [ $? -ne 0 ]; then
         echo "Failed to build the Docker image. Exiting."
         exit 1
@@ -69,35 +52,45 @@ else
 fi
 
 echo "Running the Docker container..."
-#DOCKER_RUN_CMD=("sudo" "docker" "run" "-it" "--rm" "-e" "DISPLAY=$DISPLAY" "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR" "-v" "/tmp/.X11-unix:/tmp/.X11-unix" "--network=host")
 DOCKER_RUN_CMD=(
-  "sudo" "docker" "run" "-it" "--rm"
-  "--privileged" # Allow access to host network stack
-  "-e" "DISPLAY=$DISPLAY"
-  "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR"
-  "-v" "/tmp/.X11-unix:/tmp/.X11-unix"
-  "--network=host"
+    "sudo" "docker" "run"
+    "-it" "--rm"
+    "--privileged"
+    "-e" "DISPLAY=$DISPLAY"
+    "-v" "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR"
+    "-v" "$HOST_PAYLOADS_DIR:$CONTAINER_PAYLOADS_DIR"
+    "-v" "/tmp/.X11-unix:/tmp/.X11-unix"
+    "--network=host"
 )
 
 if [ -n "$SSH_KEY_DIR" ]; then
     DOCKER_RUN_CMD+=("-v" "$SSH_KEY_DIR:/temp-ssh:ro")
 fi
 
-DOCKER_RUN_CMD+=("$IMAGE_NAME" "bash" "-c" "
+DOCKER_RUN_CMD+=( "$IMAGE_NAME" "bash" "-c" "
+    echo 'Ensuring directories exist inside the container...'
+    mkdir -p $CONTAINER_LOOT_DIR $CONTAINER_PAYLOADS_DIR
+    echo 'Verifying directories:'
+    ls -ld $CONTAINER_LOOT_DIR $CONTAINER_PAYLOADS_DIR
+
+    # Handle SSH key setup if provided
     if [ -d /temp-ssh ]; then
+        echo 'Copying SSH keys...'
         mkdir -p /root/.ssh
         cp /temp-ssh/* /root/.ssh/
         chmod 600 /root/.ssh/*
     fi
+
+    echo 'Starting application...'
     exec python3 /app/cloak.py
 ")
 
 "${DOCKER_RUN_CMD[@]}"
 
-# Check for errors
 if [ $? -eq 0 ]; then
     echo "Docker container ran successfully."
 else
     echo "Docker container encountered an error."
     exit 1
 fi
+

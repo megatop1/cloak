@@ -19,6 +19,17 @@ ascii_art = """
 ═════════════════════════════════════════════════════════
 """
 
+def loot():
+    loot_dir = "/app/loot"
+    payloads_dir = "/app/payloads"
+
+    for directory in [loot_dir, payloads_dir]:
+        if not os.path.exists(directory):
+            print(f"Creating directory: {directory}")
+            os.makedirs(directory, exist_ok=True)
+        else:
+            print(f"Directory '{directory}' already exists.")
+
 # Global directory for SSH keys
 ssh_key_directory = None
 
@@ -288,6 +299,10 @@ def smb_masq():
     """
     Set up a SMB masquerade dynamically for tunneling.
     """
+    ###
+    payloads_dir = "/app/payloads"
+    signed_binaries_dir = "/app/sig_binaries"
+
     print("Initializing SMB masquerade...")
     target_ip = text("Enter Target IP of SMB:").ask()
     smb_username = text("Enter Username:").ask()
@@ -336,7 +351,7 @@ def smb_masq():
         if auth_choice == "Password":
             smb_password = input("Enter SMB Password: ")
             command = (
-                f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password}"
+                f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password} -debug"
             )
         elif auth_choice == "Hashes":
             smb_hash = input("Enter NTLM Hash: ")
@@ -354,10 +369,10 @@ def smb_masq():
 
         if auth_choice == "Password":
             smb_password = input("Enter SMB Password: ")
-            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password}"
+            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host {target_ip} --username {smb_username} --password {smb_password} -debug"
         elif auth_choice == "Hashes":
             winrm_hash = input("Enter NTLM Hash: ")
-            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} -ntlm :{smb_hash}"
+            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
 
     # Execute the command
     print("Executing:", command)
@@ -645,6 +660,8 @@ def main():
 
     if ssh_key_directory is None:
         ssh_key_directory = os.path.expanduser("~/.ssh")
+
+    loot()
 
     choice = select(
         "Select a Masquerade Type:",
