@@ -351,12 +351,12 @@ def smb_masq():
         if auth_choice == "Password":
             smb_password = input("Enter SMB Password: ")
             command = (
-                f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password} -debug"
+                f"python /app/slinger/src/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password} -debug"
             )
         elif auth_choice == "Hashes":
             smb_hash = input("Enter NTLM Hash: ")
             command = (
-                f"python /app/slinger/build/scripts-3.12/slinger.py -host 127.0.0.1 --username {smb_username} -ntlm :{smb_hash}"
+                f"python /app/slinger/src/slinger.py -host 127.0.0.1 --username {smb_username} -ntlm :{smb_hash}"
             )
 
     else:
@@ -369,10 +369,10 @@ def smb_masq():
 
         if auth_choice == "Password":
             smb_password = input("Enter SMB Password: ")
-            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host {target_ip} --username {smb_username} --password {smb_password} -debug"
+            command = f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} --password {smb_password} -debug"
         elif auth_choice == "Hashes":
             winrm_hash = input("Enter NTLM Hash: ")
-            command = f"python /app/slinger/build/scripts-3.12/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
+            command = f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
 
     # Execute the command
     print("Executing:", command)

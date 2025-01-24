@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
     python3-impacket \
+    x11-xserver-utils \ 
     && apt-get clean
 
 # Install Evil-WinRM
@@ -35,7 +36,8 @@ RUN git clone https://github.com/ghost-ng/slinger.git && \
     cd slinger && \
     pip install -r requirements.txt && \
     pip install . && \
-    export PATH=~/.local/bin:$PATH 
+    export PATH=~/.local/bin:$PATH && \
+    usermod -aG video root && chmod +x /usr/bin/xfreerdp
 
 # Copy the Python script into the container
 COPY cloak.py /app/cloak.py

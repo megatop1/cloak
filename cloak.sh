@@ -16,6 +16,8 @@ for DIR in "$HOST_LOOT_DIR" "$HOST_PAYLOADS_DIR"; do
     fi
 done
 
+xhost +local:docker
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --rebuild)
