@@ -51,6 +51,19 @@ predefined_tunnel_ports = {
     "SMB": [44500, 44501],
 }
 
+def prompt_for_tunnel():
+    """
+    Prompt the user to check if tunneling is needed and return the tunnel count.
+    :return: Number of tunnels (1 or 2), or None if tunneling is not needed.
+    """
+    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
+        tunnel_count = int(select(
+            "Select the Number of Tunnels Required:",
+            choices=["1", "2"],
+            style=custom_style,
+        ).ask())
+        return tunnel_count
+    return None
 
 def get_free_port():
     """Find an available port on the local machine."""
@@ -225,39 +238,25 @@ def winrm_masq():
     print("Initializing WinRM masquerade...")
     target_ip = text("Enter Target IP of WinRM:").ask()
     winrm_username = text("Enter Username:").ask()
-    #password = text("Enter Password:").ask()
 
-    # Prompt for tunneling
-    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
-        tunnel_count = int(select(
-            "Select the Number of Tunnels Required:",
-            choices=["1", "2"],
-            style=custom_style,
-        ).ask())
-
-        # Set predefined ports based on the tunnel count
+    tunnel_count = prompt_for_tunnel()
+    if tunnel_count:
         predefined_ports = [5985] if tunnel_count == 1 else [5986, 5985]
-
-        # Dynamically assign the target port based on the tunnel count
         target_port = 5985 if tunnel_count == 1 else 5986
 
-        # Set up tunnels and dynamically retrieve listening ports
         first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
             tunnel_count=tunnel_count,
             target_ip=target_ip,
-            target_port=target_port,  # Automatically assigned
+            target_port=target_port,
             custom_ports=predefined_ports
         )
-
-        # Debug: Ensure the correct ports are being used
-        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
 
         if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
             return
 
-        # Use the first tunnel port for Evil-WinRM
         winrm_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+        # Continue with authentication and command setup
 
         # Prompt for authentication type
         auth_choice = select(
@@ -306,20 +305,11 @@ def smb_masq():
     print("Initializing SMB masquerade...")
     target_ip = text("Enter Target IP of SMB:").ask()
     smb_username = text("Enter Username:").ask()
-    #password = text("Enter Password:").ask()
 
-   # Prompt for tunneling
-    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
-        tunnel_count = int(select(
-            "Select the Number of Tunnels Required:",
-            choices=["1", "2"],
-            style=custom_style,
-        ).ask())
-
+    tunnel_count = prompt_for_tunnel()
+    if tunnel_count:
         # Set predefined ports based on the tunnel count
         predefined_ports = [445] if tunnel_count == 1 else [446, 445]
-
-
         # Dynamically assign the target port based on the tunnel count
         target_port = 445 if tunnel_count == 1 else 446
 
@@ -331,15 +321,9 @@ def smb_masq():
             custom_ports=predefined_ports
         )
 
-        # Debug: Ensure the correct ports are being used
-        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
-
         if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
             return
-
-        # Use the first tunnel port for Evil-WinRM
-        smb_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
 
         # Prompt for authentication type
         auth_choice = select(
@@ -385,20 +369,11 @@ def rdp_masq():
     print("Initializing RDP masquerade...")
     target_ip = text("Enter Target IP of RDP:").ask()
     rdp_username = text("Enter Username:").ask()
-    #password = text("Enter Password:").ask()
 
-   # Prompt for tunneling
-    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
-        tunnel_count = int(select(
-            "Select the Number of Tunnels Required:",
-            choices=["1", "2"],
-            style=custom_style,
-        ).ask())
-
+    tunnel_count = prompt_for_tunnel()
+    if tunnel_count:
         # Set predefined ports based on the tunnel count
         predefined_ports = [3389] if tunnel_count == 1 else [3390, 3389]
-
-
         # Dynamically assign the target port based on the tunnel count
         target_port = 3389 if tunnel_count == 1 else 3390
 
@@ -410,15 +385,12 @@ def rdp_masq():
             custom_ports=predefined_ports
         )
 
-        # Debug: Ensure the correct ports are being used
-        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
-
         if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
             return
 
         # Use the first tunnel port for Evil-WinRM
-        smb_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+        #smb_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
 
         # Prompt for authentication type
         auth_choice = select(
@@ -464,20 +436,11 @@ def ssh_masq():
     print("Initializing SSH masquerade...")
     target_ip = text("Enter Target IP of SSH:").ask()
     ssh_username = text("Enter Username:").ask()
-    #password = text("Enter Password:").ask()
 
-   # Prompt for tunneling
-    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
-        tunnel_count = int(select(
-            "Select the Number of Tunnels Required:",
-            choices=["1", "2"],
-            style=custom_style,
-        ).ask())
-
+    tunnel_count = prompt_for_tunnel()
+    if tunnel_count:
         # Set predefined ports based on the tunnel count
         predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
-
-
         # Dynamically assign the target port based on the tunnel count
         target_port = 22 if tunnel_count == 1 else 2222
 
@@ -488,9 +451,6 @@ def ssh_masq():
             target_port=target_port,  # Automatically assigned
             custom_ports=predefined_ports
         )
-
-        # Debug: Ensure the correct ports are being used
-        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
 
         if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
@@ -562,20 +522,11 @@ def sftp_masq():
     print("Initializing SFTP masquerade...")
     target_ip = text("Enter Target IP of SSH:").ask()
     sftp_username = text("Enter Username:").ask()
-    #password = text("Enter Password:").ask()
 
-   # Prompt for tunneling
-    if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
-        tunnel_count = int(select(
-            "Select the Number of Tunnels Required:",
-            choices=["1", "2"],
-            style=custom_style,
-        ).ask())
-
+    tunnel_count = prompt_for_tunnel()
+    if tunnel_count:
         # Set predefined ports based on the tunnel count
         predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
-
-
         # Dynamically assign the target port based on the tunnel count
         target_port = 22 if tunnel_count == 1 else 2222
 
@@ -586,9 +537,6 @@ def sftp_masq():
             target_port=target_port,  # Automatically assigned
             custom_ports=predefined_ports
         )
-
-        # Debug: Ensure the correct ports are being used
-        print(f"DEBUG: First tunnel port: {first_tunnel_port}, Last tunnel port: {last_tunnel_port}")
 
         if not first_tunnel_port or not last_tunnel_port:
             print("Failed to set up tunnels. Exiting.")
