@@ -211,7 +211,6 @@ def setup_socks_tunnel(tunnel_count, target_ip, target_port):
         print("ERROR: Multi-hop SOCKS tunneling is not yet implemented.")
         return None, None
 
-
 def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port, custom_ports=None):
     """
     Set up a chain of tunnels dynamically based on the user-defined number of hops.
@@ -412,67 +411,73 @@ def winrm_masq():
 
 def smb_masq():
     """
-    Set up a SMB masquerade dynamically for tunneling.
+    Set up an SMB masquerade dynamically for tunneling.
     """
-    ###
-    payloads_dir = "/app/payloads"
-    signed_binaries_dir = "/app/sig_binaries"
-
     print("Initializing SMB masquerade...")
     target_ip = text("Enter Target IP of SMB:").ask()
     smb_username = text("Enter Username:").ask()
 
-    tunnel_count = prompt_for_tunnel()
-    if tunnel_count:
-        # Set predefined ports based on the tunnel count
-        predefined_ports = [445] if tunnel_count == 1 else [446, 445]
-        # Dynamically assign the target port based on the tunnel count
-        target_port = 445 if tunnel_count == 1 else 446
+    # Prompt for tunnel type and count
+    tunnel_type, tunnel_count = prompt_for_tunnel()
+    if tunnel_type and tunnel_count:
+        print(f"Tunneling Type: {tunnel_type}, Tunnels: {tunnel_count}")
 
-        # Set up tunnels and dynamically retrieve listening ports
-        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
-            tunnel_count=tunnel_count,
-            target_ip=target_ip,
-            target_port=target_port,  # Automatically assigned
-            custom_ports=predefined_ports
-        )
+        if tunnel_type == "SOCKS":
+            # Redirect to SOCKS setup
+            local_socks_port, _ = setup_socks_tunnel(tunnel_count, target_ip, 445)
+            if not local_socks_port:
+                print("Failed to set up SOCKS tunnel. Exiting.")
+                return
 
-        if not first_tunnel_port or not last_tunnel_port:
-            print("Failed to set up tunnels. Exiting.")
-            return
+        elif tunnel_type == "SSH Tunnel":
+            # Proceed with SSH tunnel setup
+            predefined_ports = [445] if tunnel_count == 1 else [446, 445]
+            target_port = 445 if tunnel_count == 1 else 446
 
-        # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Hashes"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            smb_password = input("Enter SMB Password: ")
-            command = (
-                f"python /app/slinger/src/slinger.py -host 127.0.0.1 --username {smb_username} --password {smb_password} -debug"
+            first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+                tunnel_count=tunnel_count,
+                target_ip=target_ip,
+                target_port=target_port,
+                custom_ports=predefined_ports
             )
-        elif auth_choice == "Hashes":
-            smb_hash = input("Enter NTLM Hash: ")
+
+            if not first_tunnel_port or not last_tunnel_port:
+                print("Failed to set up tunnels. Exiting.")
+                return
+            target_ip = "127.0.0.1"
+
+    # Prompt for authentication type
+    auth_choice = select(
+        "How do you want to authenticate?",
+        choices=["Password", "Hashes"],
+        style=custom_style,
+    ).ask()
+
+    if auth_choice == "Password":
+        smb_password = input("Enter SMB Password: ")
+        if tunnel_type == "SOCKS":
             command = (
-                f"python /app/slinger/src/slinger.py -host 127.0.0.1 --username {smb_username} -ntlm :{smb_hash}"
+                f"proxychains python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} --password {smb_password}"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
+            command = (
+                f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} --password {smb_password}"
+            )
+
+    elif auth_choice == "Hashes":
+        smb_hash = input("Enter NTLM Hash: ")
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
+            command = (
+                f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
             )
 
     else:
-        # No tunneling
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Hashes"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            smb_password = input("Enter SMB Password: ")
-            command = f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} --password {smb_password} -debug"
-        elif auth_choice == "Hashes":
-            winrm_hash = input("Enter NTLM Hash: ")
-            command = f"python /app/slinger/src/slinger.py -host {target_ip} --username {smb_username} -ntlm :{smb_hash}"
+        print("Invalid authentication choice. Exiting.")
+        return
 
     # Execute the command
     print("Executing:", command)
