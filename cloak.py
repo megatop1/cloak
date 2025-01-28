@@ -485,70 +485,80 @@ def smb_masq():
 
 def rdp_masq():
     """
-    Set up a RDP masquerade dynamically for tunneling.
+    Set up an RDP masquerade dynamically for tunneling.
     """
     print("Initializing RDP masquerade...")
     target_ip = text("Enter Target IP of RDP:").ask()
     rdp_username = text("Enter Username:").ask()
 
-    tunnel_count = prompt_for_tunnel()
-    if tunnel_count:
-        # Set predefined ports based on the tunnel count
-        predefined_ports = [3389] if tunnel_count == 1 else [3390, 3389]
-        # Dynamically assign the target port based on the tunnel count
-        target_port = 3389 if tunnel_count == 1 else 3390
+    # Prompt for tunnel type and count
+    tunnel_type, tunnel_count = prompt_for_tunnel()
+    if tunnel_type and tunnel_count:
+        print(f"Tunneling Type: {tunnel_type}, Tunnels: {tunnel_count}")
 
-        # Set up tunnels and dynamically retrieve listening ports
-        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
-            tunnel_count=tunnel_count,
-            target_ip=target_ip,
-            target_port=target_port,  # Automatically assigned
-            custom_ports=predefined_ports
-        )
+        if tunnel_type == "SOCKS":
+            # Redirect to SOCKS setup
+            local_socks_port, _ = setup_socks_tunnel(tunnel_count, target_ip, 3389)
+            if not local_socks_port:
+                print("Failed to set up SOCKS tunnel. Exiting.")
+                return
 
-        if not first_tunnel_port or not last_tunnel_port:
-            print("Failed to set up tunnels. Exiting.")
-            return
+        elif tunnel_type == "SSH Tunnel":
+            # Proceed with SSH tunnel setup
+            predefined_ports = [3389] if tunnel_count == 1 else [3390, 3389]
+            target_port = 3389 if tunnel_count == 1 else 3390
 
-        # Use the first tunnel port for Evil-WinRM
-        #smb_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+            first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+                tunnel_count=tunnel_count,
+                target_ip=target_ip,
+                target_port=target_port,
+                custom_ports=predefined_ports
+            )
 
-        # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Hashes"],
-            style=custom_style,
-        ).ask()
+            if not first_tunnel_port or not last_tunnel_port:
+                print("Failed to set up tunnels. Exiting.")
+                return
+            target_ip = "127.0.0.1"
 
-        if auth_choice == "Password":
-            rdp_password = input("Enter RDP Password: ")
+    # Prompt for authentication type
+    auth_choice = select(
+        "How do you want to authenticate?",
+        choices=["Password", "Hashes"],
+        style=custom_style,
+    ).ask()
+
+    command = None  # Initialize command variable to prevent unbound errors
+
+    if auth_choice == "Password":
+        rdp_password = input("Enter RDP Password: ")
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains xfreerdp /cert-ignore /u:{rdp_username} /p:{rdp_password} /v:{target_ip}"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
             command = (
                 f"xfreerdp /cert-ignore /u:{rdp_username} /p:{rdp_password} /v:127.0.0.1"
             )
-        elif auth_choice == "Hashes":
-            rdp_hash = input("Enter NTLM Hash: ")
+
+    elif auth_choice == "Hashes":
+        rdp_hash = input("Enter NTLM Hash: ")
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains xfreerdp /cert-ignore /u:{rdp_username} /pth:{rdp_hash} /v:{target_ip}"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
             command = (
                 f"xfreerdp /cert-ignore /u:{rdp_username} /pth:{rdp_hash} /v:127.0.0.1"
             )
 
-    else:
-        # No tunneling
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Hashes"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            rdp_password = input("Enter RDP Password: ")
-            command = f"xfreerdp /cert-ignore /u:{rdp_username} /p:{rdp_password} /v:{target_ip}"
-        elif auth_choice == "Hashes":
-            rdp_hash = input("Enter NTLM Hash: ")
-            command = f"xfreerdp /cert-ignore /u:{rdp_username} /pth:{rdp_hash} /v:{target_ip}"
+    if not command:
+        print("Failed to generate a valid command. Exiting.")
+        return
 
     # Execute the command
     print("Executing:", command)
     subprocess.run(command, shell=True)
+
 
 def ssh_masq():
     """
