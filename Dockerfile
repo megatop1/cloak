@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     python3-impacket \
     x11-xserver-utils \ 
+    proxychains \
     && apt-get clean
 
 # Install Evil-WinRM

