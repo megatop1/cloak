@@ -559,88 +559,80 @@ def rdp_masq():
     print("Executing:", command)
     subprocess.run(command, shell=True)
 
-
 def ssh_masq():
     """
-    Set up a SSH masquerade dynamically for tunneling.
+    Set up an SSH masquerade dynamically for tunneling.
     """
     print("Initializing SSH masquerade...")
     target_ip = text("Enter Target IP of SSH:").ask()
     ssh_username = text("Enter Username:").ask()
 
-    tunnel_count = prompt_for_tunnel()
-    if tunnel_count:
-        # Set predefined ports based on the tunnel count
-        predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
-        # Dynamically assign the target port based on the tunnel count
-        target_port = 22 if tunnel_count == 1 else 2222
+    # Prompt for tunnel type and count
+    tunnel_type, tunnel_count = prompt_for_tunnel()
+    if tunnel_type and tunnel_count:
+        print(f"Tunneling Type: {tunnel_type}, Tunnels: {tunnel_count}")
 
-        # Set up tunnels and dynamically retrieve listening ports
-        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
-            tunnel_count=tunnel_count,
-            target_ip=target_ip,
-            target_port=target_port,  # Automatically assigned
-            custom_ports=predefined_ports
-        )
+        if tunnel_type == "SOCKS":
+            # Redirect to SOCKS setup
+            local_socks_port, _ = setup_socks_tunnel(tunnel_count, target_ip, 22)
+            if not local_socks_port:
+                print("Failed to set up SOCKS tunnel. Exiting.")
+                return
 
-        if not first_tunnel_port or not last_tunnel_port:
-            print("Failed to set up tunnels. Exiting.")
-            return
+        elif tunnel_type == "SSH Tunnel":
+            # Proceed with SSH tunnel setup
+            predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
+            target_port = 22 if tunnel_count == 1 else 2222
 
-        # Use the first tunnel port for Evil-WinRM
-        ssh_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
+            first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+                tunnel_count=tunnel_count,
+                target_ip=target_ip,
+                target_port=target_port,
+                custom_ports=predefined_ports
+            )
 
-        # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Key"],
-            style=custom_style,
-        ).ask()
+            if not first_tunnel_port or not last_tunnel_port:
+                print("Failed to set up tunnels. Exiting.")
+                return
+            target_ip = "127.0.0.1"
 
-        if auth_choice == "Password":
+    # Prompt for authentication type
+    auth_choice = select(
+        "How do you want to authenticate?",
+        choices=["Password", "SSH Key"],
+        style=custom_style,
+    ).ask()
+
+    if auth_choice == "Password":
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ssh_username}@{target_ip} /bin/bash"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
             command = (
                 f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ssh_username}@127.0.0.1 /bin/bash"
             )
-        elif auth_choice == "Key":
-            # Select SSH Key
-            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
 
-            if not selected_ssh_key:
-                print("No valid SSH key selected. Exiting.")
-                return  # Exit if no key is selected
+    elif auth_choice == "SSH Key":
+        selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
+        if not selected_ssh_key:
+            print("No valid SSH key selected. Exiting.")
+            return  # Exit if no key is selected
 
-             # Construct the command using the selected SSH key
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{ssh_username}@{target_ip} /bin/bash"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
             command = (
                 f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
                 f"{ssh_username}@127.0.0.1 /bin/bash"
-             )
+            )
 
     else:
-        # No tunneling
-                # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Key"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            command = (
-                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {ssh_username}@127.0.0.1 /bin/bash"
-            )
-        elif auth_choice == "Key":
-            # Select SSH Key
-            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
-
-            if not selected_ssh_key:
-                print("No valid SSH key selected. Exiting.")
-                return  # Exit if no key is selected
-
-             # Construct the command using the selected SSH key
-            command = (
-                f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-                f"{ssh_username}@127.0.0.1 /bin/bash"
-             )
+        print("Invalid authentication choice. Exiting.")
+        return
 
     # Execute the command
     print("Executing:", command)
@@ -648,90 +640,83 @@ def ssh_masq():
 
 def sftp_masq():
     """
-    Set up a SFTP masquerade dynamically for tunneling.
+    Set up an SFTP masquerade dynamically for tunneling.
     """
-    print("Initializing SFTP masquerade...")
-    target_ip = text("Enter Target IP of SSH:").ask()
+    print("Initializing SFTP  masquerade...")
+    target_ip = text("Enter Target IP of SFTP:").ask()
     sftp_username = text("Enter Username:").ask()
 
-    tunnel_count = prompt_for_tunnel()
-    if tunnel_count:
-        # Set predefined ports based on the tunnel count
-        predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
-        # Dynamically assign the target port based on the tunnel count
-        target_port = 22 if tunnel_count == 1 else 2222
+    # Prompt for tunnel type and count
+    tunnel_type, tunnel_count = prompt_for_tunnel()
+    if tunnel_type and tunnel_count:
+        print(f"Tunneling Type: {tunnel_type}, Tunnels: {tunnel_count}")
 
-        # Set up tunnels and dynamically retrieve listening ports
-        first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
-            tunnel_count=tunnel_count,
-            target_ip=target_ip,
-            target_port=target_port,  # Automatically assigned
-            custom_ports=predefined_ports
-        )
+        if tunnel_type == "SOCKS":
+            # Redirect to SOCKS setup
+            local_socks_port, _ = setup_socks_tunnel(tunnel_count, target_ip, 22)
+            if not local_socks_port:
+                print("Failed to set up SOCKS tunnel. Exiting.")
+                return
 
-        if not first_tunnel_port or not last_tunnel_port:
-            print("Failed to set up tunnels. Exiting.")
-            return
+        elif tunnel_type == "SSH Tunnel":
+            # Proceed with SSH tunnel setup
+            predefined_ports = [22] if tunnel_count == 1 else [2222, 22]
+            target_port = 22 if tunnel_count == 1 else 2222
 
-        # Use the first tunnel port for Evil-WinRM
-        ssh_command_port = first_tunnel_port if tunnel_count > 1 else last_tunnel_port
-
-        # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Key"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            command = (
-                f"sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {sftp_username}@127.0.0.1"
+            first_tunnel_port, last_tunnel_port = setup_tunnel_chain_dynamic_with_ports(
+                tunnel_count=tunnel_count,
+                target_ip=target_ip,
+                target_port=target_port,
+                custom_ports=predefined_ports
             )
-        elif auth_choice == "Key":
-            # Select SSH Key
-            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
 
-            if not selected_ssh_key:
-                print("No valid SSH key selected. Exiting.")
-                return  # Exit if no key is selected
+            if not first_tunnel_port or not last_tunnel_port:
+                print("Failed to set up tunnels. Exiting.")
+                return
+            target_ip = "127.0.0.1"
 
-             # Construct the command using the selected SSH key
+    # Prompt for authentication type
+    auth_choice = select(
+        "How do you want to authenticate?",
+        choices=["Password", "SSH Key"],
+        style=custom_style,
+    ).ask()
+
+    if auth_choice == "Password":
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {sftp_username}@{target_ip}"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
+            command = (
+                f"sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+				f"{sftp_username}@127.0.0.1"
+            )
+
+    elif auth_choice == "SSH Key":
+        selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
+        if not selected_ssh_key:
+            print("No valid SSH key selected. Exiting.")
+            return  # Exit if no key is selected
+
+        if tunnel_type == "SOCKS":
+            command = (
+                f"proxychains sftp -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"{ssh_username}@{target_ip} /bin/bash"
+            )
+        elif tunnel_type == "SSH Tunnel" or not tunnel_type:
             command = (
                 f"sftp -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-                f"{sftp_username}@127.0.0.1"
-             )
+                f"{ssh_username}@127.0.0.1 /bin/bash"
+            )
 
     else:
-        # No tunneling
-                # Prompt for authentication type
-        auth_choice = select(
-            "How do you want to authenticate?",
-            choices=["Password", "Key"],
-            style=custom_style,
-        ).ask()
-
-        if auth_choice == "Password":
-            command = (
-                f"sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {sftp_username}@127.0.0.1"
-            )
-        elif auth_choice == "Key":
-            # Select SSH Key
-            selected_ssh_key = select_ssh_key(os.path.expanduser("~/.ssh"))
-
-            if not selected_ssh_key:
-                print("No valid SSH key selected. Exiting.")
-                return  # Exit if no key is selected
-
-             # Construct the command using the selected SSH key
-            command = (
-                f"ssh -i ~/.ssh/{selected_ssh_key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-                f"{sftp_username}@127.0.0.1 /bin/bash"
-             )
+        print("Invalid authentication choice. Exiting.")
+        return
 
     # Execute the command
     print("Executing:", command)
     subprocess.run(command, shell=True)
-
 
 def main():
     global ssh_key_directory
