@@ -20,15 +20,14 @@ ascii_art = """
 """
 
 def loot():
-    loot_dir = "/app/loot"
-    payloads_dir = "/app/payloads"
-
-    for directory in [loot_dir, payloads_dir]:
-        if not os.path.exists(directory):
-            print(f"Creating directory: {directory}")
-            os.makedirs(directory, exist_ok=True)
-        else:
-            print(f"Directory '{directory}' already exists.")
+    loot_directory = "/app/loot"
+    try:
+        os.chdir(loot_directory)
+        print("Changed working directory to:", os.getcwd())
+    except FileNotFoundError:
+        print("Error: Directory does not exist:", loot_directory)
+    except PermissionError:
+        print("Error: You do not have permissions to access this directory.")
 
 # Global directory for SSH keys
 ssh_key_directory = None
@@ -323,6 +322,7 @@ def winrm_masq():
     """
     Set up a WinRM masquerade dynamically for tunneling.
     """
+    loot()
     print("Initializing WinRM masquerade...")
     target_ip = text("Enter Target IP of WinRM:").ask()
     winrm_username = text("Enter Username:").ask()
@@ -413,6 +413,7 @@ def smb_masq():
     """
     Set up an SMB masquerade dynamically for tunneling.
     """
+    loot()
     print("Initializing SMB masquerade...")
     target_ip = text("Enter Target IP of SMB:").ask()
     smb_username = text("Enter Username:").ask()
@@ -487,6 +488,7 @@ def rdp_masq():
     """
     Set up an RDP masquerade dynamically for tunneling.
     """
+    loot()
     print("Initializing RDP masquerade...")
     target_ip = text("Enter Target IP of RDP:").ask()
     rdp_username = text("Enter Username:").ask()
@@ -563,6 +565,7 @@ def ssh_masq():
     """
     Set up an SSH masquerade dynamically for tunneling.
     """
+    loot()
     print("Initializing SSH masquerade...")
     target_ip = text("Enter Target IP of SSH:").ask()
     ssh_username = text("Enter Username:").ask()
@@ -642,6 +645,7 @@ def sftp_masq():
     """
     Set up an SFTP masquerade dynamically for tunneling.
     """
+    loot()
     print("Initializing SFTP  masquerade...")
     target_ip = text("Enter Target IP of SFTP:").ask()
     sftp_username = text("Enter Username:").ask()
