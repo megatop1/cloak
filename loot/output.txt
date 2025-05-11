@@ -1,0 +1,6 @@
+SESSION  UID USER            SEAT  TTY
+   1559 2101 kistapper-admin       pts/0
+  17442 2101 kistapper-admin       
+     c6  126 gdm             seat0 tty1
+
+3 sessions listed.

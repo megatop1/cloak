@@ -18,7 +18,6 @@ target_ip = None
 target_port = None
 credential_type = None
 credential_value = None
-credential_username = None
 
 # CLI Style to Look Cool and Fancy Like Sliver and Metasploit
 cloak_style = Style.from_dict({
@@ -88,13 +87,10 @@ def show():
     table.add_row("Target IP", target_ip if target_ip else "[italic]Not set[/italic]")
     table.add_row("Port", str(target_port) if target_port else "[italic]Not set[/italic]")
     table.add_row("SSH Key", ssh_key_directory if ssh_key_directory else "[italic]Not set[/italic]")
-    if credential_username:
-        table.add_row("Active Credential", f"{credential_username} ({credential_type})")
-    else:
-        table.add_row("Active Credential", "[italic]Not set[/italic]")
 
     console.print(table)
 
+    # If credentials exist, print a second table
     if credentials:
         cred_table = Table(title="Stored Credentials", show_lines=True)
         cred_table.add_column("Username", style="cyan")

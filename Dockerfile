@@ -18,16 +18,26 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
     python3-impacket \
-    x11-xserver-utils \ 
+    x11-xserver-utils \
     proxychains \
-    && apt-get clean
+    libx11-6 \
+    libxext6 \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    libxi6 \
+    libxcomposite1 \
+    libxdamage1 && \
+    apt-get clean
 
 # Install Evil-WinRM
-RUN gem install ffi
-RUN gem install evil-winrm
+RUN gem install ffi && \
+    gem install evil-winrm
+
+# Set working directory
+WORKDIR /app
 
 # Install Chisel
-WORKDIR /app
 RUN wget https://github.com/jpillora/chisel/releases/download/v1.10.1/chisel_1.10.1_linux_amd64.deb && \
     dpkg -i chisel_1.10.1_linux_amd64.deb && \
     rm -f chisel_1.10.1_linux_amd64.deb
@@ -36,19 +46,18 @@ RUN wget https://github.com/jpillora/chisel/releases/download/v1.10.1/chisel_1.1
 RUN git clone https://github.com/ghost-ng/slinger.git && \
     cd slinger && \
     pip install -r requirements.txt && \
-    pip install . && \
-    export PATH=~/.local/bin:$PATH && \
-    usermod -aG video root && chmod +x /usr/bin/xfreerdp
+    pip install .
 
-# Copy the Python script into the container
+# Copy your scripts into the container
 COPY cloak.py /app/cloak.py
-WORKDIR /app
+COPY completer.py /app/completer.py
 
 # Install Python dependencies
-RUN pip install --no-cache-dir questionary
+RUN pip install --no-cache-dir questionary prompt_toolkit rich pexpect
 
 # Set environment variable for display (for X11 forwarding)
 ENV DISPLAY=:0.0
 
 # Default command to run the script
 CMD ["python", "cloak.py"]
+
