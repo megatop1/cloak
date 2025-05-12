@@ -9,6 +9,7 @@ from rich.table import Table
 from rich.text import Text
 from prompt_toolkit import PromptSession
 from completer import CloakCompleter
+from completer import credential_index_provider
 from prompt_toolkit.styles import Style
 from prompt_toolkit.completion import WordCompleter, Completer, Completion
 
@@ -68,16 +69,20 @@ def list_loot_files():
     console.print(table)
 
 def use_credential(index):
-    global credential_type, credential_value
-    if not credentials:
-        console.print("[red]No credentials have been set.[/red]")
-        return
+    global credential_type, credential_value, credential_username
     try:
-        key = list(credentials.keys())[index - 1]
-        credential_type, credential_value = credentials[key]
-        console.print(f"[green]Now using credential #[/green] {index} [green]for user:[/green] {key}")
-    except IndexError:
-        console.print(f"[red]Invalid credential index:[/red] {index}")
+        usernames = list(credentials.keys())
+        selected = usernames[index - 1]
+        credential_type, credential_value = credentials[selected]
+        credential_username = selected
+        console.print(f"[green]Using credential {index} ({selected})[/green]")
+    except (IndexError, ValueError):
+        console.print("[red]Invalid credential index.[/red]")
+
+def get_credential_indexes():
+    return list(range(1, len(credentials) + 1))
+
+credential_index_provider = get_credential_indexes
 
 def show():
     table = Table(title="Current Configuration", show_lines=True)
@@ -155,15 +160,16 @@ def ssh():
     import getpass
     import tempfile
 
-    if not all([target_ip, target_port, credentials]):
-        console.print("[red]Missing required configuration. Use 'show' to verify.[/red]")
+    global credential_username, credential_type, credential_value
+    username = credential_username
+    cred_type = credential_type
+    cred_value = credential_value
+
+    if not all([target_ip, target_port, credential_type, credential_value]):
+        console.print("[red]Missing required configuration or credential. Use 'show' to verify.[/red]")
         return
 
-    if len(credentials) == 0:
-        console.print("[red]No credentials set. Use:[/red] set credential <username> <type> <value>")
-        return
 
-    username, (cred_type, cred_value) = next(iter(credentials.items()))
     if cred_type != "password":
         console.print(f"[red]SSH only supports password-based SSH in this function (got: {cred_type})[/red]")
         return
@@ -422,13 +428,11 @@ def rdp():
         console.print(f"[red]RDP session error:[/red] {e}")
 
 def main():
-    global ssh_key_directory, current_protocol, target_ip, target_port, credential_type, credential_value
+    global ssh_key_directory, current_protocol, target_ip, target_port, credential_type, credential_value, credential_username
     if ssh_key_directory is None:
         ssh_key_directory = os.path.expanduser("~/.ssh")
 
     loot()
-
-    console = Console()
 
     cloak_art = r"""
 .................................................
@@ -475,14 +479,8 @@ def main():
         complete_in_thread=False,
     )
 
-    def use_credential(index):
-        global credential_type, credential_value
-        try:
-            username = list(credentials.keys())[index - 1]
-            credential_type, credential_value = credentials[username]
-            console.print(f"[green]Using credential {index} ({username})[/green]")
-        except (IndexError, ValueError):
-            console.print("[red]Invalid credential index.[/red]")
+    # Sync credentials to completer
+    session.completer.credentials = credentials
 
     while True:
         try:
@@ -576,7 +574,5 @@ def main():
         except EOFError:
             break
 
-
 if __name__ == "__main__":
     main()
-
