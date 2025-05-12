@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     netcat-openbsd \
     openssh-client \
+    sqlite3 \
     curl \
     wget \
     git \
@@ -51,6 +52,7 @@ RUN git clone https://github.com/ghost-ng/slinger.git && \
 # Copy your scripts into the container
 COPY cloak.py /app/cloak.py
 COPY completer.py /app/completer.py
+COPY ssh_module.py /app/ssh_module.py
 
 # Install Python dependencies
 RUN pip install --no-cache-dir questionary prompt_toolkit rich pexpect

