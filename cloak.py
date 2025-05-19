@@ -8,7 +8,7 @@ from ssh_module import ssh
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, prompt
 from completer import CloakCompleter
 from completer import credential_index_provider
 from prompt_toolkit.styles import Style
@@ -306,6 +306,74 @@ def rdp():
     except Exception as e:
         console.print(f"[red]RDP session error:[/red] {e}")
 
+def bruteforcer():
+    import subprocess
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import WordCompleter
+    from rich.console import Console
+
+    global target_ip, target_port
+    console = Console()
+
+    default_prefix_file = "/app/bruteforcer/prefix.txt"
+    default_password_file = "/app/bruteforcer/passwords.txt"
+    temp_password_file = "/tmp/possible-passwords.txt"
+
+    protocol_completer = WordCompleter(
+        ["ftp", "ldap", "mssql", "nfs", "rdp", "smb", "ssh", "vnc", "winrm", "wmi"],
+        ignore_case=True
+    )
+    protocol = prompt("[+] Protocol to Brute Force: ", completer=protocol_completer).strip().lower()
+    username = input("[+] Username to Brute Force: ").strip()
+    use_known = input("[+] Previous Known Password?: Y/n ").strip().lower()
+
+    password_file = default_password_file
+
+    if use_known == "y":
+        known_password = input("[+] Enter known password: ").strip()
+        prefix_file = input(f"[+] Prefix file [default: {default_prefix_file}]: ").strip()
+        if not prefix_file:
+            prefix_file = default_prefix_file
+
+        try:
+            with open(prefix_file, "r") as pf:
+                prefixes = pf.read().splitlines()
+
+            if not prefixes:
+                console.print("[red]No prefixes found in the prefix file.[/red]")
+                return
+
+            max_prefix_len = max(len(p) for p in prefixes)
+            total_length = max_prefix_len + len(known_password)
+
+            crunch_cmd = [
+                "crunch", str(total_length), str(total_length),
+                "-f", "/usr/share/crunch/charset.lst", "mixalpha-numeric-all",
+                "-t", f"{'@' * max_prefix_len}{known_password}",
+                "-o", temp_password_file
+            ]
+
+            console.print(f"[bold green]Generating password list:[/bold green] {' '.join(crunch_cmd)}")
+            subprocess.run(crunch_cmd)
+            password_file = temp_password_file
+
+        except Exception as e:
+            console.print(f"[red]Error generating password list:[/red] {e}")
+            return
+
+    if not target_ip or not target_port:
+        console.print("[red]Set the target IP and port first using 'set target <ip>' and 'set port <port>'[/red]")
+        return
+
+    cmd = ["nxc", protocol, target_ip, "--port", str(target_port), "-u", username, "-p", password_file]
+    console.print(f"[bold green]Running:[/bold green] {' '.join(cmd)}")
+
+    try:
+        subprocess.run(cmd)
+    except Exception as e:
+        console.print(f"[red]Error running NetExec:[/red] {e}")
+
+
 def main():
     global ssh_key_directory, current_protocol, target_ip, target_port, credential_type, credential_value, credential_username
     if ssh_key_directory is None:
@@ -358,7 +426,6 @@ def main():
         complete_in_thread=False,
     )
 
-    # Sync credentials to completer
     session.completer.credentials = credentials
 
     while True:
@@ -383,6 +450,9 @@ def main():
                 case "show":
                     show()
 
+                case "bruteforcer":
+                    bruteforcer()
+
                 case "connect":
                     connect()
 
@@ -400,7 +470,6 @@ def main():
 
                     key = parts[1].lower()
 
-                    # Special case for credentials (expects 5 parts: set credential <username> <type> <value>)
                     if key == "credential":
                         if len(parts) != 5:
                             console.print("[red]Usage:[/red] set credential <username> <type> <value>")
@@ -453,5 +522,7 @@ def main():
         except EOFError:
             break
 
+
 if __name__ == "__main__":
     main()
+

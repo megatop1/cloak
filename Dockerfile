@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     git \
     vim \
+    pipx \
+    crunch \
     software-properties-common \
     freerdp2-x11 \
     ruby-dev \
@@ -49,6 +51,14 @@ RUN git clone https://github.com/ghost-ng/slinger.git && \
     pip install -r requirements.txt && \
     pip install .
 
+# Install NetExec
+# Install NetExec and generate prefixes
+RUN pipx ensurepath && \
+    pipx install git+https://github.com/Pennyw0rth/NetExec && \
+    mkdir -p /app/bruteforcer && \
+    crunch 3 3 -f "/usr/share/crunch/charset.lst" mixalpha-numeric-all -t @@@ -o /app/bruteforcer/prefix.txt
+
+
 # Copy your scripts into the container
 COPY cloak.py /app/cloak.py
 COPY completer.py /app/completer.py
@@ -59,6 +69,7 @@ RUN pip install --no-cache-dir questionary prompt_toolkit rich pexpect
 
 # Set environment variable for display (for X11 forwarding)
 ENV DISPLAY=:0.0
+ENV PATH=$PATH:/root/.local/bin
 
 # Default command to run the script
 CMD ["python", "cloak.py"]

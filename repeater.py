@@ -1,6 +1,6 @@
 from prompt_toolkit.completion import Completer, Completion
 
-available_protocols = ["WinRM", "SMB", "RDP", "SSH", "SFTP"]
+available_protocols = ["WinRM", "SMB", "RDP", "SSH", "SFTP"]  # <-- Added here
 available_credential_types = ["password", "key", "hash"]
 
 # This function will be set externally in cloak.py
@@ -14,14 +14,6 @@ class CloakCompleter(Completer):
 
         if words[:2] == ["set", "credential"] and len(words) >= 4:
             return
-
-        # cloak > [TAB] or cloak > s[TAB]
-        if len(words) == 1:
-            top_commands = ["set", "use", "show", "help", "exit", "quit", "connect", "loot", "list_loot", "bruteforcer"]
-            already_typed = words[0]
-            for cmd in top_commands:
-                if cmd.startswith(already_typed.lower()):
-                    yield Completion(cmd, start_position=-len(already_typed))
 
         # cloak > set
         if len(words) == 1 and words[0] == "set":

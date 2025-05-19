@@ -7,9 +7,11 @@ HOST_LOOT_DIR="$(pwd)/loot"
 CONTAINER_LOOT_DIR="/app/loot"
 HOST_PAYLOADS_DIR="$(pwd)/payloads"
 CONTAINER_PAYLOADS_DIR="/app/payloads"
+HOST_BRUTEFORCER_DIR="$(pwd)/bruteforcer"        # [ADDED]
+CONTAINER_BRUTEFORCER_DIR="/app/bruteforcer"     # [ADDED]
 
-# Ensure the loot and payloads directories exist on the host
-for DIR in "$HOST_LOOT_DIR" "$HOST_PAYLOADS_DIR"; do
+# Ensure the loot, payloads, and bruteforcer directories exist on the host
+for DIR in "$HOST_LOOT_DIR" "$HOST_PAYLOADS_DIR" "$HOST_BRUTEFORCER_DIR"; do
     if [ ! -d "$DIR" ]; then
         echo "[+] Creating directory: $DIR"
         mkdir -p "$DIR"
@@ -22,7 +24,6 @@ if [ -z "$DISPLAY" ]; then
     exit 1
 fi
 
-# Allow Docker to access host X11
 xhost +local:docker > /dev/null
 
 # Parse arguments
@@ -86,12 +87,13 @@ sudo docker run -it --rm \
     -v "$HOME/.Xauthority:/root/.Xauthority:ro" \
     -v "$HOST_LOOT_DIR:$CONTAINER_LOOT_DIR" \
     -v "$HOST_PAYLOADS_DIR:$CONTAINER_PAYLOADS_DIR" \
+    -v "$HOST_BRUTEFORCER_DIR:$CONTAINER_BRUTEFORCER_DIR" \
     -v "/tmp/.X11-unix:/tmp/.X11-unix" \
     --network=host \
     ${SSH_KEY_DIR:+-v "$SSH_KEY_DIR:/temp-ssh:ro"} \
     "$IMAGE_NAME" bash -c '
         echo "[+] Ensuring directories exist inside the container..."
-        mkdir -p /app/loot /app/payloads
+        mkdir -p /app/loot /app/payloads /app/bruteforcer     # [ADDED]
 
         if [ -d /temp-ssh ]; then
             echo "[+] Copying SSH keys..."
@@ -109,4 +111,3 @@ else
     echo "Docker container encountered an error."
     exit 1
 fi
-
